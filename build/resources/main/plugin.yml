@@ -1,0 +1,23 @@
+name: AFKDummy
+version: '1.0.0'
+description: 'Processes main resources.'
+main: com.plugin.afkdummy.AFKDummyPlugin
+api-version: '1.21'
+authors:
+  - FakePlayerFarm
+
+commands:
+  afkdummy:
+    description: Open the AFK Dummy management GUI
+    usage: /<command>
+    aliases:
+      - dummy
+    permission: afkdummy.use
+
+permissions:
+  afkdummy.use:
+    description: Allows access to the AFK Dummy GUI
+    default: true
+  afkdummy.admin:
+    description: Admin permissions for AFK Dummy management
+    default: op
