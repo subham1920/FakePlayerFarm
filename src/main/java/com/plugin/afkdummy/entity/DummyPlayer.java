@@ -4,14 +4,10 @@ import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import com.plugin.afkdummy.util.SkinUtil;
 import com.plugin.afkdummy.util.DebugLogger;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.network.Connection;
-import net.minecraft.network.PacketSendListener;
-import net.minecraft.network.ProtocolInfo;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.game.*;
@@ -40,17 +36,24 @@ import java.util.logging.Level;
  * Wraps a NMS {@link ServerPlayer} to create a fake player entity that behaves
  * identically to a real player for chunk loading and mob spawning mechanics.
  * <p>
- * The dummy player is injected into the server's player list and chunk tracking
- * systems, ensuring it contributes to mob cap calculations and keeps chunks
- * loaded with proper tick processing.
+ * The dummy player is injected into the server's player list via
+ * {@link net.minecraft.server.players.PlayerList#placeNewPlayer}, the same
+ * method used when a real player logs in. This ensures the server's
+ * simulation engine fully recognizes the dummy for:
+ * <ul>
+ *   <li>PLAYER chunk ticket creation (keeps chunks entity-ticking)</li>
+ *   <li>ChunkMap player tracking (mob cap contribution + spawn radius)</li>
+ *   <li>Natural mob spawning loop inclusion</li>
+ *   <li>Random block tick processing (crop growth, sugar cane, etc.)</li>
+ * </ul>
  * </p>
  *
  * <h3>Key Technical Details:</h3>
  * <ul>
- *   <li>Uses a mocked {@link Connection} via Netty's {@link EmbeddedChannel}
+ *   <li>Uses a spoofed {@link Connection} via Netty's {@link EmbeddedChannel}
  *       to satisfy the server's networking requirements without a real socket</li>
- *   <li>Registered in {@link net.minecraft.server.players.PlayerList} for full
- *       chunk ticket and mob cap participation</li>
+ *   <li>Registered via {@link net.minecraft.server.players.PlayerList#placeNewPlayer}
+ *       for full chunk ticket and mob cap participation</li>
  *   <li>Set to invulnerable with no physics processing</li>
  * </ul>
  */
@@ -60,6 +63,13 @@ public class DummyPlayer {
     private final UUID ownerUUID;
     private final String ownerName;
     private final Plugin plugin;
+
+    /** The spoofed network connection, retained for lifecycle cleanup. */
+    private final Connection connection;
+
+    /** The authentication cookie used during placeNewPlayer. */
+    private final CommonListenerCookie cookie;
+
     private boolean spawned = false;
 
     /**
@@ -85,72 +95,80 @@ public class DummyPlayer {
         String dummyName = "[AFK] " + truncateName(ownerName, 10);
         GameProfile profile = new GameProfile(dummyUUID, dummyName);
 
-        // Create the ServerPlayer entity
-        this.handle = new ServerPlayer(server, level, profile, ClientInformation.createDefault());
+        // Create ClientInformation with default settings (view distance, language, etc.)
+        ClientInformation clientInfo = ClientInformation.createDefault();
 
-        // Set position and rotation
+        // Create the ServerPlayer entity
+        this.handle = new ServerPlayer(server, level, profile, clientInfo);
+
+        // Set position and rotation BEFORE placeNewPlayer so the server
+        // creates chunk tickets around the correct location
         handle.setPos(location.getX(), location.getY(), location.getZ());
         handle.setRot(location.getYaw(), location.getPitch());
 
-        // Configure dummy attributes
-        handle.setInvulnerable(true);
-        handle.setNoGravity(true);
-        handle.setSilent(true);
-        handle.getBukkitEntity().setCollidable(false);
-
-        // Set game mode to survival (important for mob spawning algorithms)
-        handle.setGameMode(GameType.SURVIVAL);
-
         // Set up the mock network connection
-        setupMockConnection(server);
+        // This must happen BEFORE spawn() / placeNewPlayer()
+        this.connection = createSpoofedConnection();
+        this.cookie = new CommonListenerCookie(profile, 0, clientInfo, false, "vanilla", java.util.Collections.emptySet(), new io.papermc.paper.util.KeepAlive());
+        setupMockPacketListener(server);
 
         // Load the owner's skin asynchronously
         loadOwnerSkin(profile);
     }
 
     /**
-     * Sets up a mock network connection for the dummy player.
-     * This prevents NPEs when the server attempts to send packets to the fake player.
+     * Creates a spoofed {@link Connection} backed by a no-op {@link EmbeddedChannel}.
+     * <p>
+     * Uses {@link PacketFlow#CLIENTBOUND} because from the server's perspective,
+     * packets flow toward the "client" (our fake player). The EmbeddedChannel
+     * silently consumes all outbound data.
+     * </p>
+     *
+     * @return a fully wired Connection ready for ServerGamePacketListenerImpl
      */
-    private void setupMockConnection(MinecraftServer server) {
-        try {
-            // Create a no-op embedded channel for the Connection
-            EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter() {
-                @Override
-                public void channelRead(ChannelHandlerContext ctx, Object msg) {
-                    // Silently consume all inbound messages
-                }
-            }) {
-                @Override
-                public java.net.SocketAddress remoteAddress() {
-                    return new java.net.InetSocketAddress("127.0.0.1", 25565);
-                }
-                @Override
-                public java.net.SocketAddress localAddress() {
-                    return new java.net.InetSocketAddress("127.0.0.1", 25565);
-                }
-            };
-
-            // Create the Connection with the embedded channel
-            Connection connection = new Connection(PacketFlow.SERVERBOUND);
-
-            // Inject our embedded channel into the Connection
-            // The Connection class stores the channel in a field
-            try {
-                var channelField = Connection.class.getDeclaredField("channel");
-                channelField.setAccessible(true);
-                channelField.set(connection, channel);
-            } catch (NoSuchFieldException | IllegalAccessException e) {
-                plugin.getLogger().log(Level.WARNING,
-                        "Could not inject channel into Connection via field. "
-                                + "Attempting alternative approach.", e);
+    private Connection createSpoofedConnection() {
+        // Create a no-op embedded channel that silently consumes everything
+        EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                // Silently consume all inbound messages
+            }
+        }) {
+            @Override
+            public java.net.SocketAddress remoteAddress() {
+                return new java.net.InetSocketAddress("127.0.0.1", 0);
             }
 
-            // Create the CommonListenerCookie for authentication
-            CommonListenerCookie cookie = CommonListenerCookie.createInitial(
-                    handle.getGameProfile(), false);
+            @Override
+            public java.net.SocketAddress localAddress() {
+                return new java.net.InetSocketAddress("127.0.0.1", 0);
+            }
+        };
 
-            // Create and bind the packet listener
+        // Create the Connection with SERVERBOUND flow direction
+        // (client → server direction, which is what the server receives)
+        Connection conn = new Connection(PacketFlow.SERVERBOUND);
+
+        // Inject the embedded channel into the Connection.
+        // Also manually assign the public fields 'channel' and 'address' because 
+        // EmbeddedChannel is already active when created, meaning Netty will not 
+        // fire channelActive() on handlers added post-construction.
+        conn.channel = channel;
+        conn.address = channel.remoteAddress();
+        channel.pipeline().addLast("packet_handler", conn);
+
+        return conn;
+    }
+
+    /**
+     * Sets up the mock packet listener that prevents NPEs when the server
+     * attempts to send packets to the fake player.
+     *
+     * @param server the Minecraft server instance
+     */
+    private void setupMockPacketListener(MinecraftServer server) {
+        try {
+            // Create and bind the no-op packet listener
             ServerGamePacketListenerImpl listener = new ServerGamePacketListenerImpl(
                     server, connection, handle, cookie) {
                 @Override
@@ -160,7 +178,7 @@ public class DummyPlayer {
 
                 @Override
                 public void disconnect(net.minecraft.network.chat.Component reason) {
-                    // No-op: dummy cannot be disconnected
+                    // No-op: dummy cannot be disconnected via normal means
                 }
 
                 @Override
@@ -169,11 +187,12 @@ public class DummyPlayer {
                 }
             };
 
+            // Bind the listener to the player BEFORE placeNewPlayer
             handle.connection = listener;
 
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE,
-                    "Failed to set up mock connection for dummy player!", e);
+                    "Failed to set up mock packet listener for dummy player!", e);
             throw new IllegalStateException("Cannot create dummy player: network setup failed", e);
         }
     }
@@ -196,8 +215,19 @@ public class DummyPlayer {
     }
 
     /**
-     * Spawns the dummy player into the world and registers it with
-     * all server tracking systems.
+     * Spawns the dummy player into the world using the server's full
+     * player join lifecycle.
+     * <p>
+     * Uses {@link net.minecraft.server.players.PlayerList#placeNewPlayer} which
+     * handles all necessary registration including:
+     * <ul>
+     *   <li>Creating PLAYER chunk tickets around the dummy</li>
+     *   <li>Registering in ChunkMap for mob spawning radius tracking</li>
+     *   <li>Adding to the server's player list</li>
+     *   <li>Broadcasting spawn packets to all online players</li>
+     *   <li>Entity tracking registration</li>
+     * </ul>
+     * </p>
      */
     public void spawn() {
         if (spawned) {
@@ -208,84 +238,43 @@ public class DummyPlayer {
         try {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
 
-            // Add to the server's player list - this handles:
-            // - Chunk ticket creation (keeps chunks loaded)
-            // - ChunkMap player tracking (mob cap contribution)
-            // - Entity tracking for visibility
-            server.getPlayerList().getPlayers().add(handle);
+            // Use placeNewPlayer — the SAME method called when a real player logs in.
+            // This is the critical call that registers the player in all server systems:
+            // chunk tickets, ChunkMap tracking, entity tracking, player list, etc.
+            server.getPlayerList().placeNewPlayer(connection, handle, cookie);
 
-            // Add entity to the world level
-            ServerLevel level = (ServerLevel) handle.level();
-            level.addNewPlayer(handle);
+            // Post-spawn configuration
+            // These must be set AFTER placeNewPlayer because placeNewPlayer may
+            // reset some values during its initialization sequence.
+
+            // Survival mode is critical — the mob spawning algorithm skips spectators
+            handle.setGameMode(GameType.SURVIVAL);
+
+            // Make invulnerable and static
+            handle.setInvulnerable(true);
+            handle.setNoGravity(true);
+            handle.setSilent(true);
+            handle.getBukkitEntity().setCollidable(false);
 
             // Force Paper's spawner to recognize the dummy for natural mob spawning
             handle.getBukkitEntity().setAffectsSpawning(true);
 
-            // Send spawn packets to all online players
-            sendSpawnPacketsToAll();
-
             spawned = true;
             plugin.getLogger().info("Spawned AFK dummy for " + ownerName
                     + " at " + formatLocation());
-            DebugLogger.log(String.format("Successfully spawned dummy player entity for %s at %s. ID: %d, UUID: %s",
+            DebugLogger.log(String.format(
+                    "Successfully spawned dummy player via placeNewPlayer for %s at %s. ID: %d, UUID: %s",
                     ownerName, formatLocation(), handle.getId(), handle.getUUID()));
 
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE,
                     "Failed to spawn dummy for " + ownerName, e);
-            DebugLogger.log(String.format("ERROR: Failed to spawn dummy for %s. Reason: %s", ownerName, e.toString()));
+            DebugLogger.log(String.format("ERROR: Failed to spawn dummy for %s. Reason: %s",
+                    ownerName, e.toString()));
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             DebugLogger.log(sw.toString());
             throw new IllegalStateException("Dummy spawn failed", e);
-        }
-    }
-
-    /**
-     * Sends the necessary spawn packets to all online players so the dummy
-     * appears visually in the world.
-     */
-    private void sendSpawnPacketsToAll() {
-        // Player info packet (adds to tab list and provides skin data)
-        ClientboundPlayerInfoUpdatePacket infoPacket = new ClientboundPlayerInfoUpdatePacket(
-                EnumSet.of(
-                        ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
-                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED
-                ),
-                java.util.List.of(handle)
-        );
-
-        // Entity spawn packet
-        ClientboundAddEntityPacket spawnPacket = new ClientboundAddEntityPacket(
-                handle.getId(),
-                handle.getUUID(),
-                handle.getX(),
-                handle.getY(),
-                handle.getZ(),
-                handle.getXRot(),
-                handle.getYRot(),
-                handle.getType(),
-                0,
-                Vec3.ZERO,
-                handle.getYHeadRot()
-        );
-
-        // Entity metadata packet (skin layers, pose, etc.)
-        ClientboundSetEntityDataPacket dataPacket = new ClientboundSetEntityDataPacket(
-                handle.getId(),
-                handle.getEntityData().getNonDefaultValues()
-        );
-
-        // Send to all online players
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
-            if (nmsPlayer.connection != null) {
-                nmsPlayer.connection.send(infoPacket);
-                nmsPlayer.connection.send(spawnPacket);
-                if (dataPacket.packedItems() != null && !dataPacket.packedItems().isEmpty()) {
-                    nmsPlayer.connection.send(dataPacket);
-                }
-            }
         }
     }
 
@@ -310,8 +299,17 @@ public class DummyPlayer {
     }
 
     /**
-     * Cleanly removes the dummy from the server, unregistering it from
-     * all tracking systems and removing it from the world.
+     * Cleanly removes the dummy from the server using the server's full
+     * player removal lifecycle.
+     * <p>
+     * Uses {@link net.minecraft.server.players.PlayerList#remove} which handles:
+     * <ul>
+     *   <li>Chunk ticket removal</li>
+     *   <li>Entity untracking from ChunkMap</li>
+     *   <li>Removal from internal player list</li>
+     *   <li>Broadcasting remove packets to all online players</li>
+     * </ul>
+     * </p>
      */
     public void remove() {
         if (!spawned) return;
@@ -319,15 +317,10 @@ public class DummyPlayer {
         try {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
 
-            // Send removal packets to all online players
-            sendRemovalPacketsToAll();
-
-            // Remove from server player list
-            server.getPlayerList().getPlayers().remove(handle);
-
-            // Remove entity from the world
-            ServerLevel level = (ServerLevel) handle.level();
-            level.removePlayerImmediately(handle, Entity.RemovalReason.DISCARDED);
+            // Use the server's own removal method — mirrors what happens when a
+            // real player disconnects. This cleanly handles chunk tickets,
+            // entity tracking, player list removal, and packet broadcasting.
+            server.getPlayerList().remove(handle);
 
             spawned = false;
             plugin.getLogger().info("Removed AFK dummy for " + ownerName);
@@ -335,32 +328,38 @@ public class DummyPlayer {
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE,
                     "Error removing dummy for " + ownerName, e);
-        }
-    }
 
-    /**
-     * Sends removal packets to all online players.
-     */
-    private void sendRemovalPacketsToAll() {
-        // Remove from tab list
-        ClientboundPlayerInfoRemovePacket removeInfoPacket =
-                new ClientboundPlayerInfoRemovePacket(java.util.List.of(handle.getUUID()));
-
-        // Remove entity
-        ClientboundRemoveEntitiesPacket removeEntityPacket =
-                new ClientboundRemoveEntitiesPacket(handle.getId());
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
-            if (nmsPlayer.connection != null) {
-                nmsPlayer.connection.send(removeInfoPacket);
-                nmsPlayer.connection.send(removeEntityPacket);
+            // Fallback: if PlayerList.remove() fails, try manual cleanup
+            try {
+                server_fallbackRemove();
+            } catch (Exception fallbackEx) {
+                plugin.getLogger().log(Level.SEVERE,
+                        "Fallback removal also failed for " + ownerName, fallbackEx);
             }
         }
     }
 
     /**
+     * Emergency fallback removal in case PlayerList.remove() throws.
+     * Manually removes the entity from the world and player list.
+     */
+    private void server_fallbackRemove() {
+        MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+        server.getPlayerList().getPlayers().remove(handle);
+        ServerLevel level = (ServerLevel) handle.level();
+        level.removePlayerImmediately(handle, Entity.RemovalReason.DISCARDED);
+        spawned = false;
+        plugin.getLogger().warning("Used fallback removal for dummy " + ownerName);
+    }
+
+    /**
      * Sends spawn packets to a specific player (e.g., when they join the server).
+     * <p>
+     * This is a safety net for late-joining players. In most cases,
+     * the server's entity tracking system (set up by placeNewPlayer)
+     * will handle this automatically, but we send packets explicitly
+     * as a fallback.
+     * </p>
      *
      * @param player the player to send packets to
      */

@@ -440,6 +440,11 @@ public class DummyManager {
                 String gameMode = dummyBukkit.getGameMode().name();
                 boolean doMobSpawning = Boolean.TRUE.equals(world.getGameRuleValue(org.bukkit.GameRules.SPAWN_MOBS));
 
+                // Check if the dummy is registered in the server's PlayerList
+                // This is the critical indicator that placeNewPlayer worked
+                boolean inPlayerList = org.bukkit.Bukkit.getServer().getOnlinePlayers().stream()
+                        .anyMatch(p -> p.getUniqueId().equals(dummyBukkit.getUniqueId()));
+
                 // Count nearby monsters (within 32 blocks)
                 int monsterCount = world.getNearbyEntities(loc, 32, 32, 32,
                         e -> e instanceof org.bukkit.entity.Monster).size();
@@ -449,9 +454,10 @@ public class DummyManager {
                         e -> e instanceof Player && !isDummyPlayer((Player) e)).size();
 
                 DebugLogger.log(String.format(
-                        "Dummy [%s]: Pos=%s(%d, %d, %d) | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
+                        "Dummy [%s]: Pos=%s(%d, %d, %d) | InPlayerList=%b | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
                         session.getOwnerName(),
                         world.getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(),
+                        inPlayerList,
                         chunkLoaded,
                         affectsSpawning,
                         gameMode,

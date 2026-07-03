@@ -21,21 +21,19 @@ dependencies {
     implementation("com.google.code.gson:gson:2.13.1")
 }
 
-tasks {
-    processResources {
-        val props = mapOf("version" to version, "description" to description)
-        inputs.properties(props)
-        filesMatching("plugin.yml") {
-            expand(props)
-        }
+tasks.processResources {
+    val props = mapOf("version" to version, "description" to description)
+    inputs.properties(props)
+    filesMatching("plugin.yml") {
+        expand(props)
     }
+}
 
-    shadowJar {
-        archiveClassifier.set("")
-        minimize()
-    }
+tasks.shadowJar {
+    archiveClassifier.set("")
+    minimize()
+}
 
-    build {
-        dependsOn(shadowJar)
-    }
+tasks.build {
+    dependsOn(tasks.shadowJar)
 }
