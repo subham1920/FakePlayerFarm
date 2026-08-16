@@ -19,7 +19,7 @@ repositories {
 dependencies {
     paperweight.paperDevBundle("26.2.build.+")
     implementation("com.google.code.gson:gson:2.13.1")
-    implementation("org.bstats:bstats-bukkit:3.1.0")
+    implementation("org.bstats:bstats-bukkit:3.2.1")
 }
 
 tasks.processResources {
