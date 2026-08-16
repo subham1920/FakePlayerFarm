@@ -25,7 +25,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public class AFKDummyPlugin extends JavaPlugin {
 
-    private static final int BSTATS_PLUGIN_ID = 24890;
+    private static final int BSTATS_PLUGIN_ID = 33409;
 
     private ConfigManager configManager;
     private StorageManager storageManager;
