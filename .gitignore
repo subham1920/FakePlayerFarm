@@ -1,2 +1,52 @@
+# ==============================================
+# Gradle & Build Artifacts
+# ==============================================
 .gradle/
 build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# ==============================================
+# Paperweight & Server Run Caches
+# ==============================================
+.paperweight/
+run/
+cache/
+
+# ==============================================
+# IDEs & Text Editors
+# ==============================================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+*.sublime-workspace
+*.sublime-project
+
+# ==============================================
+# OS Generated Files
+# ==============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==============================================
+# Logs, Temp Files & Runtime Data
+# ==============================================
+*.log
+*.tmp
+*.bak
+debug.log
+dummies.json
+dummies.json.tmp
+plugins/
