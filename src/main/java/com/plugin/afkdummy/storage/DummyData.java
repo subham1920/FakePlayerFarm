@@ -9,9 +9,13 @@ import java.util.UUID;
 /**
  * Data class representing a persisted dummy player session.
  * Serialized to/from JSON via GSON.
+ * <p>
+ * Uniquely identified by a {@code sessionId} to support multiple dummies per owner.
+ * </p>
  */
 public class DummyData {
 
+    private String sessionId;
     private String ownerUniqueId;
     private String ownerName;
     private int dummyEntityId;
@@ -27,22 +31,24 @@ public class DummyData {
     public DummyData() {}
 
     /**
-     * Constructs a complete DummyData entry.
+     * Constructs a complete DummyData entry with a unique session ID.
      *
-     * @param ownerUniqueId     UUID of the player who owns this dummy
-     * @param ownerName         display name of the owner
-     * @param dummyEntityId     NMS entity ID of the dummy
-     * @param worldName         name of the world the dummy is in
-     * @param x                 X coordinate
-     * @param y                 Y coordinate
-     * @param z                 Z coordinate
-     * @param yaw               yaw rotation
-     * @param pitch             pitch rotation
+     * @param sessionId           unique ID for this specific dummy session
+     * @param ownerUniqueId       UUID of the player who owns this dummy
+     * @param ownerName           display name of the owner
+     * @param dummyEntityId       NMS entity ID of the dummy
+     * @param worldName           name of the world the dummy is in
+     * @param x                   X coordinate
+     * @param y                   Y coordinate
+     * @param z                   Z coordinate
+     * @param yaw                 yaw rotation
+     * @param pitch               pitch rotation
      * @param expirationTimestamp epoch millis when this session expires
      */
-    public DummyData(UUID ownerUniqueId, String ownerName, int dummyEntityId,
+    public DummyData(UUID sessionId, UUID ownerUniqueId, String ownerName, int dummyEntityId,
                      String worldName, double x, double y, double z,
                      float yaw, float pitch, long expirationTimestamp) {
+        this.sessionId = (sessionId != null ? sessionId : UUID.randomUUID()).toString();
         this.ownerUniqueId = ownerUniqueId.toString();
         this.ownerName = ownerName;
         this.dummyEntityId = dummyEntityId;
@@ -53,6 +59,31 @@ public class DummyData {
         this.yaw = yaw;
         this.pitch = pitch;
         this.expirationTimestamp = expirationTimestamp;
+    }
+
+    /** @return the unique session ID */
+    public UUID getSessionId() {
+        if (sessionId == null || sessionId.isEmpty()) {
+            sessionId = UUID.nameUUIDFromBytes(("session:" + ownerUniqueId + ":" + expirationTimestamp).getBytes()).toString();
+        }
+        try {
+            return UUID.fromString(sessionId);
+        } catch (IllegalArgumentException e) {
+            sessionId = UUID.randomUUID().toString();
+            return UUID.fromString(sessionId);
+        }
+    }
+
+    /** @return raw session ID string */
+    public String getRawSessionId() {
+        if (sessionId == null || sessionId.isEmpty()) {
+            sessionId = getSessionId().toString();
+        }
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
     }
 
     /** @return the owner's UUID parsed from the stored string */
@@ -154,7 +185,7 @@ public class DummyData {
 
     @Override
     public String toString() {
-        return "DummyData{owner=" + ownerName + ", world=" + worldName
+        return "DummyData{session=" + sessionId + ", owner=" + ownerName + ", world=" + worldName
                 + ", pos=(" + String.format("%.1f, %.1f, %.1f", x, y, z)
                 + "), expires=" + expirationTimestamp + "}";
     }

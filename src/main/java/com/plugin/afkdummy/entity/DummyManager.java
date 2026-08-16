@@ -18,8 +18,8 @@ import java.util.logging.Level;
  * Central manager for all active dummy player sessions.
  * <p>
  * Handles the complete lifecycle of dummy players including spawning, tracking,
- * expiration cleanup, persistence, and server restart recovery. This class is
- * the single source of truth for all active dummy entities on the server.
+ * expiration cleanup, persistence, and server restart recovery. Supports multiple
+ * dummies per player up to the configured limit.
  * </p>
  */
 public class DummyManager {
@@ -27,6 +27,7 @@ public class DummyManager {
     private final AFKDummyPlugin plugin;
     private final ConfigManager config;
     private final StorageManager storage;
+    /** Map of Session ID -> DummySession */
     private final Map<UUID, DummySession> activeSessions;
     private BukkitTask cleanupTask;
     private BukkitTask debugTask;
@@ -47,7 +48,6 @@ public class DummyManager {
 
     /**
      * Starts the periodic cleanup task that checks for expired sessions.
-     * The task runs on the main thread at the interval specified in config.
      */
     public void startCleanupTask() {
         long intervalTicks = config.getCleanupIntervalSeconds() * 20L;
@@ -55,7 +55,9 @@ public class DummyManager {
         plugin.getLogger().info("Cleanup task started (interval: " + config.getCleanupIntervalSeconds() + "s)");
 
         // Run diagnostics debug task every 10 seconds (200 ticks)
-        debugTask = Bukkit.getScheduler().runTaskTimer(plugin, this::runDiagnostics, 200L, 200L);
+        if (debugTask == null) {
+            debugTask = Bukkit.getScheduler().runTaskTimer(plugin, this::runDiagnostics, 200L, 200L);
+        }
     }
 
     /**
@@ -70,6 +72,18 @@ public class DummyManager {
             debugTask.cancel();
             debugTask = null;
         }
+    }
+
+    /**
+     * Restarts the cleanup task with updated configuration intervals.
+     */
+    public void restartCleanupTask() {
+        if (cleanupTask != null) {
+            cleanupTask.cancel();
+        }
+        long intervalTicks = config.getCleanupIntervalSeconds() * 20L;
+        cleanupTask = Bukkit.getScheduler().runTaskTimer(plugin, this::cleanupExpired, intervalTicks, intervalTicks);
+        plugin.getLogger().info("Cleanup task rescheduled (interval: " + config.getCleanupIntervalSeconds() + "s)");
     }
 
     /**
@@ -89,12 +103,16 @@ public class DummyManager {
         UUID ownerUUID = owner.getUniqueId();
         String ownerName = owner.getName();
 
-        // Validate limits
-        if (activeSessions.containsKey(ownerUUID)) {
-            owner.sendMessage("§c§l✕ §cYou already have an active AFK dummy!");
+        // Validate per-player limit
+        int currentCount = getActiveCountByOwner(ownerUUID);
+        int maxAllowed = config.getMaxDummiesPerPlayer();
+        if (currentCount >= maxAllowed) {
+            owner.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit ("
+                    + currentCount + "/" + maxAllowed + ")!");
             return null;
         }
 
+        // Validate server-wide limit
         if (activeSessions.size() >= config.getMaxServerWideDummies()) {
             owner.sendMessage("§c§l✕ §cServer-wide dummy limit reached ("
                     + config.getMaxServerWideDummies() + "). Try again later.");
@@ -102,22 +120,25 @@ public class DummyManager {
         }
 
         try {
+            // Generate unique session ID
+            UUID sessionId = UUID.randomUUID();
+
             // Create the dummy player entity
-            DummyPlayer dummyPlayer = new DummyPlayer(ownerUUID, ownerName, location, plugin);
+            DummyPlayer dummyPlayer = new DummyPlayer(ownerUUID, ownerName, location, sessionId, plugin);
 
             // Spawn it into the world
             dummyPlayer.spawn();
 
             // Create the session
             long expirationTimestamp = System.currentTimeMillis() + durationMs;
-            DummySession session = new DummySession(dummyPlayer, ownerUUID, ownerName, expirationTimestamp);
+            DummySession session = new DummySession(sessionId, dummyPlayer, ownerUUID, ownerName, expirationTimestamp);
 
-            // Register the session
-            activeSessions.put(ownerUUID, session);
+            // Register the session by session ID
+            activeSessions.put(sessionId, session);
 
             // Persist to storage
             DummyData data = new DummyData(
-                    ownerUUID, ownerName, dummyPlayer.getEntityId(),
+                    sessionId, ownerUUID, ownerName, dummyPlayer.getEntityId(),
                     location.getWorld().getName(),
                     location.getX(), location.getY(), location.getZ(),
                     location.getYaw(), location.getPitch(),
@@ -125,10 +146,10 @@ public class DummyManager {
             );
             storage.addEntry(data);
 
-            plugin.getLogger().info("Spawned dummy for " + ownerName
-                    + " (duration: " + com.plugin.afkdummy.util.TimeUtil.formatDurationLong(durationMs) + ")");
-            DebugLogger.log(String.format("Spawned dummy for owner: %s, UUID: %s, loc: %s(%d, %d, %d)",
-                    ownerName, ownerUUID, location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ()));
+            plugin.getLogger().info("Spawned dummy for " + ownerName + " [Session: " + sessionId
+                    + "] (duration: " + com.plugin.afkdummy.util.TimeUtil.formatDurationLong(durationMs) + ")");
+            DebugLogger.log(String.format("Spawned dummy for owner: %s, Session: %s, loc: %s(%d, %d, %d)",
+                    ownerName, sessionId, location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ()));
 
             return session;
 
@@ -140,28 +161,76 @@ public class DummyManager {
     }
 
     /**
-     * Safely despawns a dummy owned by the specified player.
+     * Safely despawns a dummy by session ID.
      *
-     * @param ownerUUID the UUID of the dummy's owner
+     * @param sessionId the session ID of the dummy
      * @return true if a dummy was found and despawned
      */
-    public boolean despawnDummy(UUID ownerUUID) {
-        DummySession session = activeSessions.remove(ownerUUID);
+    public boolean despawnDummy(UUID sessionId) {
+        DummySession session = activeSessions.remove(sessionId);
         if (session == null) {
             return false;
         }
 
         session.despawn();
-        storage.removeEntry(ownerUUID);
+        storage.removeEntry(sessionId);
 
-        plugin.getLogger().info("Despawned dummy for " + session.getOwnerName());
-        DebugLogger.log(String.format("Despawned dummy for owner: %s, UUID: %s", session.getOwnerName(), ownerUUID));
+        plugin.getLogger().info("Despawned dummy for " + session.getOwnerName() + " (session: " + sessionId + ")");
+        DebugLogger.log(String.format("Despawned dummy for owner: %s, Session: %s", session.getOwnerName(), sessionId));
         return true;
     }
 
     /**
+     * Despawns all dummies owned by a specific player.
+     *
+     * @param ownerUUID the owner's UUID
+     * @return count of despawned dummies
+     */
+    public int despawnAllForOwner(UUID ownerUUID) {
+        List<DummySession> userSessions = getSessionsByOwner(ownerUUID);
+        for (DummySession session : userSessions) {
+            despawnDummy(session.getSessionId());
+        }
+        return userSessions.size();
+    }
+
+    /**
+     * Despawns the dummy owned by the player that is closest to the player's current location.
+     *
+     * @param player the player requesting despawn
+     * @return true if a dummy was despawned
+     */
+    public boolean despawnNearest(Player player) {
+        List<DummySession> userSessions = getSessionsByOwner(player.getUniqueId());
+        if (userSessions.isEmpty()) {
+            return false;
+        }
+
+        Location playerLoc = player.getLocation();
+        DummySession nearest = null;
+        double minDistanceSq = Double.MAX_VALUE;
+
+        for (DummySession session : userSessions) {
+            Location loc = session.getLocation();
+            if (loc != null && loc.getWorld() != null && loc.getWorld().equals(playerLoc.getWorld())) {
+                double distSq = loc.distanceSquared(playerLoc);
+                if (distSq < minDistanceSq) {
+                    minDistanceSq = distSq;
+                    nearest = session;
+                }
+            } else if (nearest == null) {
+                nearest = session;
+            }
+        }
+
+        if (nearest != null) {
+            return despawnDummy(nearest.getSessionId());
+        }
+        return false;
+    }
+
+    /**
      * Despawns ALL active dummy players. Called during server shutdown.
-     * This method runs synchronously to ensure clean removal before the server stops.
      */
     public void despawnAll() {
         plugin.getLogger().info("Despawning all active dummies (" + activeSessions.size() + " total)...");
@@ -180,15 +249,6 @@ public class DummyManager {
 
     /**
      * Respawns dummies from persistent storage after a server restart.
-     * <p>
-     * This method reads saved session data, validates expiration times,
-     * and respawns any dummies that still have remaining time. Expired
-     * entries are purged from storage.
-     * </p>
-     * <p>
-     * Should be called after a delay (e.g., 40 ticks) to ensure all worlds
-     * are fully loaded before attempting to spawn entities.
-     * </p>
      */
     public void respawnFromStorage() {
         List<DummyData> entries = storage.getAllEntries();
@@ -204,9 +264,11 @@ public class DummyManager {
         int failed = 0;
 
         for (DummyData data : entries) {
+            UUID sessionId = data.getSessionId();
+
             // Check if the session has expired
             if (data.isExpired()) {
-                storage.removeEntry(data.getOwnerUUID(), false);
+                storage.removeEntry(sessionId, false);
                 expired++;
                 continue;
             }
@@ -217,7 +279,7 @@ public class DummyManager {
                 plugin.getLogger().warning("World '" + data.getWorldName()
                         + "' not found for dummy owned by " + data.getOwnerName()
                         + ". Purging entry.");
-                storage.removeEntry(data.getOwnerUUID(), false);
+                storage.removeEntry(sessionId, false);
                 failed++;
                 continue;
             }
@@ -230,30 +292,38 @@ public class DummyManager {
                 continue;
             }
 
+            // Check per-player limit
+            if (getActiveCountByOwner(data.getOwnerUUID()) >= config.getMaxDummiesPerPlayer()) {
+                plugin.getLogger().warning("Per-player limit exceeded for " + data.getOwnerName()
+                        + ". Cannot restore dummy.");
+                failed++;
+                continue;
+            }
+
             try {
-                // Create and spawn the dummy
+                // Create and spawn the dummy with preserved session ID
                 DummyPlayer dummyPlayer = new DummyPlayer(
-                        data.getOwnerUUID(), data.getOwnerName(), location, plugin);
+                        data.getOwnerUUID(), data.getOwnerName(), location, sessionId, plugin);
                 dummyPlayer.spawn();
 
                 // Create session with the ORIGINAL expiration timestamp
                 DummySession session = new DummySession(
-                        dummyPlayer, data.getOwnerUUID(), data.getOwnerName(),
+                        sessionId, dummyPlayer, data.getOwnerUUID(), data.getOwnerName(),
                         data.getExpirationTimestamp());
 
-                activeSessions.put(data.getOwnerUUID(), session);
+                activeSessions.put(sessionId, session);
 
-                // Update the entity ID in storage (may differ after restart)
+                // Update the entity ID in storage
                 data.setDummyEntityId(dummyPlayer.getEntityId());
 
                 restored++;
                 plugin.getLogger().info("Restored dummy for " + data.getOwnerName()
-                        + " (remaining: " + session.getFormattedTimeRemaining() + ")");
+                        + " [Session: " + sessionId + "] (remaining: " + session.getFormattedTimeRemaining() + ")");
 
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING,
                         "Failed to restore dummy for " + data.getOwnerName(), e);
-                storage.removeEntry(data.getOwnerUUID(), false);
+                storage.removeEntry(sessionId, false);
                 failed++;
             }
         }
@@ -280,12 +350,11 @@ public class DummyManager {
                 storage.removeEntry(entry.getKey());
 
                 plugin.getLogger().info("Session expired for " + session.getOwnerName()
-                        + ". Dummy despawned.");
+                        + " [Session: " + entry.getKey() + "]. Dummy despawned.");
 
-                // Notify the owner if they're online
-                Player owner = Bukkit.getPlayer(entry.getKey());
+                Player owner = Bukkit.getPlayer(session.getOwnerUUID());
                 if (owner != null && owner.isOnline()) {
-                    owner.sendMessage("§e§l⏰ §eYour AFK dummy session has expired. The dummy has been despawned.");
+                    owner.sendMessage("§e§l⏰ §eOne of your AFK dummy sessions has expired and was despawned.");
                 }
             }
         }
@@ -293,8 +362,6 @@ public class DummyManager {
 
     /**
      * Handles sending spawn packets to a newly joined player for all active dummies.
-     *
-     * @param player the player who just joined
      */
     public void handlePlayerJoin(Player player) {
         for (DummySession session : activeSessions.values()) {
@@ -306,8 +373,6 @@ public class DummyManager {
 
     /**
      * Handles a world being unloaded — despawns any dummies in that world.
-     *
-     * @param worldName the name of the world being unloaded
      */
     public void handleWorldUnload(String worldName) {
         Iterator<Map.Entry<UUID, DummySession>> iterator = activeSessions.entrySet().iterator();
@@ -332,27 +397,73 @@ public class DummyManager {
     // ========================================================================
 
     /**
-     * Gets the active session for a specific player.
+     * Gets all active sessions for a specific player.
      *
      * @param ownerUUID the player's UUID
-     * @return an Optional containing the session if active
+     * @return list of active sessions for this player
      */
-    public Optional<DummySession> getSession(UUID ownerUUID) {
-        return Optional.ofNullable(activeSessions.get(ownerUUID));
+    public List<DummySession> getSessionsByOwner(UUID ownerUUID) {
+        return activeSessions.values().stream()
+                .filter(s -> s.getOwnerUUID().equals(ownerUUID))
+                .toList();
     }
 
     /**
-     * Checks if a player currently has an active dummy.
+     * Gets the number of active dummies for a specific owner.
      *
      * @param ownerUUID the player's UUID
-     * @return true if the player has an active session
+     * @return count of active sessions for this owner
+     */
+    public int getActiveCountByOwner(UUID ownerUUID) {
+        return (int) activeSessions.values().stream()
+                .filter(s -> s.getOwnerUUID().equals(ownerUUID))
+                .count();
+    }
+
+    /**
+     * Checks if a player has at least one active dummy.
+     *
+     * @param ownerUUID the player's UUID
+     * @return true if the player has >= 1 active dummy
      */
     public boolean hasActiveDummy(UUID ownerUUID) {
-        return activeSessions.containsKey(ownerUUID);
+        return getActiveCountByOwner(ownerUUID) > 0;
     }
 
     /**
-     * Gets the total number of active dummy sessions.
+     * Checks if a player is allowed to spawn more dummies.
+     *
+     * @param ownerUUID the player's UUID
+     * @return true if below the configured per-player limit
+     */
+    public boolean canSpawnMore(UUID ownerUUID) {
+        return getActiveCountByOwner(ownerUUID) < config.getMaxDummiesPerPlayer();
+    }
+
+    /**
+     * Gets a specific session by its unique session ID.
+     *
+     * @param sessionId the session ID
+     * @return an Optional containing the session if active
+     */
+    public Optional<DummySession> getSession(UUID sessionId) {
+        return Optional.ofNullable(activeSessions.get(sessionId));
+    }
+
+    /**
+     * Gets the first active session for a specific player (convenience method).
+     *
+     * @param ownerUUID the player's UUID
+     * @return an Optional containing a session if active
+     */
+    public Optional<DummySession> getFirstSessionByOwner(UUID ownerUUID) {
+        return activeSessions.values().stream()
+                .filter(s -> s.getOwnerUUID().equals(ownerUUID))
+                .findFirst();
+    }
+
+    /**
+     * Gets the total number of active dummy sessions server-wide.
      *
      * @return the count of active sessions
      */
@@ -363,14 +474,14 @@ public class DummyManager {
     /**
      * Returns an unmodifiable view of all active sessions.
      *
-     * @return map of owner UUID to session
+     * @return map of session ID to session
      */
     public Map<UUID, DummySession> getAllSessions() {
         return Collections.unmodifiableMap(activeSessions);
     }
 
     /**
-     * Checks if a given Bukkit entity is one of our dummy players.
+     * Checks if a given Bukkit entity ID belongs to any managed dummy.
      *
      * @param entityId the entity ID to check
      * @return true if the entity is a managed dummy
@@ -440,22 +551,18 @@ public class DummyManager {
                 String gameMode = dummyBukkit.getGameMode().name();
                 boolean doMobSpawning = Boolean.TRUE.equals(world.getGameRuleValue(org.bukkit.GameRules.SPAWN_MOBS));
 
-                // Check if the dummy is registered in the server's PlayerList
-                // This is the critical indicator that placeNewPlayer worked
                 boolean inPlayerList = org.bukkit.Bukkit.getServer().getOnlinePlayers().stream()
                         .anyMatch(p -> p.getUniqueId().equals(dummyBukkit.getUniqueId()));
 
-                // Count nearby monsters (within 32 blocks)
                 int monsterCount = world.getNearbyEntities(loc, 32, 32, 32,
                         e -> e instanceof org.bukkit.entity.Monster).size();
 
-                // Count nearby players (excluding dummies)
                 long realPlayersNearby = world.getNearbyEntities(loc, 128, 128, 128,
                         e -> e instanceof Player && !isDummyPlayer((Player) e)).size();
 
                 DebugLogger.log(String.format(
-                        "Dummy [%s]: Pos=%s(%d, %d, %d) | InPlayerList=%b | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
-                        session.getOwnerName(),
+                        "Dummy [%s (Session: %s)]: Pos=%s(%d, %d, %d) | InPlayerList=%b | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
+                        session.getOwnerName(), session.getSessionId(),
                         world.getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(),
                         inPlayerList,
                         chunkLoaded,

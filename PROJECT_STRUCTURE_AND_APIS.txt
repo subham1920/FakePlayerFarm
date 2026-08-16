@@ -1,0 +1,299 @@
+================================================================================
+                     FAKEPLAYERFARM (AFKDUMMY)
+            PROJECT STRUCTURE, APIS & ARCHITECTURE SPECIFICATION
+================================================================================
+
+Target Environment: PaperMC 26.2 (Minecraft 1.21+ / Mojang Mappings)
+Plugin Version    : 1.0.1
+Language & JDK    : Java 25 (Standard Edition)
+Build Toolchain   : Gradle 9.6.1, Paperweight Userdev 2.0.0-beta.21, Shadow 9.4.3, bStats 3.1.0
+
+================================================================================
+PART 1: COMPLETE PROJECT DIRECTORY & FILE STRUCTURE
+================================================================================
+
+FakePlayerFarm/
+├── build.gradle.kts                   # Gradle build configuration script (v1.0.1, bStats shaded & relocated)
+├── settings.gradle.kts                # Plugin repository & toolchain settings
+├── gradle.properties                  # JVM memory and daemon configuration
+├── gradlew                            # Unix Gradle wrapper executable
+├── gradlew.bat                        # Windows Gradle wrapper batch script
+├── report.txt                         # Executive project summary report
+├── PROJECT_STRUCTURE_AND_APIS.txt     # Complete structural & API specification (this document)
+├── gradle/
+│   └── wrapper/
+│       ├── gradle-wrapper.jar         # Gradle wrapper binary execution engine
+│       └── gradle-wrapper.properties  # Configured Gradle 9.6.1 distribution URL
+└── src/
+    └── main/
+        ├── java/
+        │   └── com/plugin/afkdummy/
+        │       ├── AFKDummyPlugin.java           # Main JavaPlugin entry point, lifecycle & bStats reporting
+        │       ├── config/
+        │       │   └── ConfigManager.java        # Yaml Configuration manager & validator
+        │       ├── entity/
+        │       │   ├── DummyPlayer.java          # Core NMS ServerPlayer wrapper, network spoofing & leak-free pipeline
+        │       │   ├── DummyManager.java         # Central multi-dummy session manager, cleanup & diagnostics
+        │       │   └── DummySession.java         # Active dummy rental session metadata wrapper (Session ID model)
+        │       ├── gui/
+        │       │   ├── MenuFramework.java        # Abstract exploit-proof Chest GUI base class
+        │       │   ├── MainMenu.java             # Primary management GUI with multi-dummy status & limits
+        │       │   └── TimeSelectionMenu.java    # Duration & item payment selection GUI
+        │       ├── listener/
+        │       │   ├── GUIListener.java          # Inventory click/drag/hopper security listener
+        │       │   └── PlayerListener.java       # Entity protection, anti-grief, piston defense & portal listener
+        │       ├── storage/
+        │       │   ├── DummyData.java            # Serializable DTO with unique sessionId for JSON storage
+        │       │   └── StorageManager.java       # Thread-safe atomic JSON persistence manager
+        │       └── util/
+        │           ├── DebugLogger.java          # Dedicated debug logger writing to plugins/AFKDummy/debug.log
+        │           ├── ItemCostUtil.java         # Atomic storage item balance check & inventory deduction
+        │           ├── SkinUtil.java             # Async Mojang API skin fetcher & property injector
+        │           └── TimeUtil.java             # Duration formatting & tick conversion utilities
+        └── resources/
+            ├── config.yml                        # User-configurable plugin settings & costs
+            └── plugin.yml                        # Bukkit plugin description file & command declarations
+
+
+================================================================================
+PART 2: DETAILED CLASS-BY-CLASS BREAKDOWN
+================================================================================
+
+--------------------------------------------------------------------------------
+1. ENTRY POINT & MANAGERS
+--------------------------------------------------------------------------------
+• AFKDummyPlugin.java
+  - Role: Main plugin class extending `JavaPlugin`.
+  - Responsibilities: Initializes all subsystems (Config, Storage, DummyManager, Listeners, bStats Metrics, Commands)
+    in `onEnable()`. Schedules delayed task (default 40 ticks) to restore saved dummies once worlds
+    are fully loaded. Safely despawns all active dummies and saves storage state synchronously in `onDisable()`.
+  - Command Routing: Handles `/afkdummy` (and aliases like `/dummy`), offering `/afkdummy reload` (with task
+    rescheduling), `/afkdummy list`, `/afkdummy despawnall`, and GUI opening.
+
+• ConfigManager.java
+  - Role: Loads and validates `config.yml`.
+  - Responsibilities: Parses rental costs (`cost-per-hour`), payment material (`payment-item`),
+    per-player (`max-dummies-per-player`), server-wide dummy limits (`max-server-wide-dummies`),
+    cleanup interval, and server restart respawn delay.
+
+• StorageManager.java
+  - Role: Handles persistent storage using GSON with atomic write guarantees.
+  - Responsibilities: Saves active dummy session data (`dummies.json`) to disk using `.tmp` files and
+    `StandardCopyOption.ATOMIC_MOVE` to prevent file corruption. Supports querying and deleting by unique `sessionId`.
+
+• DummyData.java
+  - Role: Data Transfer Object (DTO) for GSON serialization.
+  - Responsibilities: Stores unique `sessionId`, owner UUID, owner name, NMS entity ID, world name,
+    coordinates (X, Y, Z, Yaw, Pitch), and expiration epoch timestamp. Includes legacy fallback logic.
+
+--------------------------------------------------------------------------------
+2. NMS CORE & ENTITY MANAGEMENT
+--------------------------------------------------------------------------------
+• DummyPlayer.java
+  - Role: Core NMS wrapper representing the fake player entity.
+  - Responsibilities: Instantiates the NMS `ServerPlayer`, configures the leak-proof spoofed network connection
+    with `ChannelOutboundHandlerAdapter` buffer releasing, enforces post-`placeNewPlayer` location positioning,
+    and applies compliant usernames and Adventure tab list display names.
+
+• DummyManager.java
+  - Role: Central registry for all active `DummySession` instances.
+  - Responsibilities: Spawns new dummies, despawns existing ones (by session ID, nearest, or all for owner),
+    enforces per-player and server-wide caps, runs periodic cleanup tasks, and runs diagnostics in `debug.log`.
+
+• DummySession.java
+  - Role: Lifecycle wrapper for an active `DummyPlayer`.
+  - Responsibilities: Associates the physical `DummyPlayer` entity with session metadata (`sessionId`, owner UUID,
+    owner name, creation time, expiration timestamp). Provides formatted time remaining getters.
+
+--------------------------------------------------------------------------------
+3. USER INTERFACE (GUI)
+--------------------------------------------------------------------------------
+• MenuFramework.java
+  - Role: Abstract inventory holder for custom chest GUIs.
+  - Responsibilities: Maps inventory slots to `Consumer<InventoryClickEvent>` click actions. Enforces
+    universal event cancellation to eliminate item extraction/duplication exploits.
+
+• MainMenu.java
+  - Role: Primary interactive GUI opened via `/afkdummy`.
+  - Responsibilities: Displays active dummy status (all active locations, remaining times), options to spawn a new
+    dummy if under `max-dummies-per-player`, force-despawn options (nearest / all), and server-wide statistics.
+
+• TimeSelectionMenu.java
+  - Role: Rental duration selection menu.
+  - Responsibilities: Presents rental tiers (1h, 3h, 12h, 24h) with live cost calculation and affordability
+    checks. Enforces per-player and server-wide limits before executing atomic item transactions.
+
+--------------------------------------------------------------------------------
+4. LISTENERS & UTILITIES
+--------------------------------------------------------------------------------
+• PlayerListener.java
+  - Role: Entity event handler for dummy protection.
+  - Responsibilities: Cancels damage (`EntityDamageEvent`), mob targeting (`EntityTargetEvent`),
+    piston displacement & head extension (`BlockPistonExtendEvent`, `BlockPistonRetractEvent`), vehicle mounting,
+    fishing rod hooking, explosions (`EntityExplodeEvent`, `BlockExplodeEvent`), and portals (`PlayerPortalEvent`, `EntityPortalEvent`).
+    Guards interaction handling to `EquipmentSlot.HAND` to eliminate double-firing glitches.
+
+• GUIListener.java
+  - Role: Inventory interaction safety listener.
+  - Responsibilities: Intercepts `InventoryClickEvent`, `InventoryDragEvent`, and `InventoryMoveItemEvent`
+    for any inventory held by `MenuFramework`, blocking unauthorized item transfers.
+
+• SkinUtil.java
+  - Role: Mojang Session API skin utility.
+  - Responsibilities: Asynchronously fetches player skin texture properties from Mojang's session servers
+    using Java `HttpClient`, caches results, includes plugin shutdown guards, and injects skin properties into `GameProfile`.
+
+• ItemCostUtil.java
+  - Role: Inventory transaction utility.
+  - Responsibilities: Provides atomic check-and-deduct operations for storage contents to prevent race
+    conditions or item dropping exploits during purchases.
+
+• TimeUtil.java
+  - Role: Time conversion and formatting helper.
+  - Responsibilities: Formats milliseconds into `HH:mm:ss` and long human-readable text. Converts hours
+    to milliseconds and ticks.
+
+• DebugLogger.java
+  - Role: File logger.
+  - Responsibilities: Appends diagnostic output directly to `plugins/AFKDummy/debug.log`.
+
+
+================================================================================
+PART 3: APIS USED & COMPREHENSIVE TECHNICAL RATIONALE ("WHY EVERYTHING WAS USED")
+================================================================================
+
+--------------------------------------------------------------------------------
+1. NET.MINECRAFT.SERVER (NMS) APIS
+--------------------------------------------------------------------------------
+
+[A] `net.minecraft.server.level.ServerPlayer`
+    • WHY IT WAS USED:
+      Standard Bukkit/Paper API entities (or custom ArmorStands/Villagers) are ignored by Minecraft's
+      natural mob spawner and random block tick engine. The game's internal ticking loop (`ServerLevel#tickChunk`)
+      specifically checks for active `ServerPlayer` instances within simulation distance to execute crop
+      growth (random ticks) and allocate hostile/passive mob caps.
+    • HOW IT WAS USED:
+      Instantiated via `new ServerPlayer(server, level, profile, clientInformation)`.
+
+[B] `net.minecraft.server.level.ClientInformation`
+    • WHY IT WAS USED:
+      Required by the 1.21+ `ServerPlayer` constructor. It defines client settings such as view distance,
+      chat visibility, skin section bitmasks, and main hand preference.
+    • HOW IT WAS USED:
+      Instantiated using `ClientInformation.createDefault()` to supply valid, standard client parameters.
+
+[C] `net.minecraft.server.players.PlayerList#placeNewPlayer(Connection, ServerPlayer, CommonListenerCookie)`
+    • WHY IT WAS USED:
+      This is the single most critical NMS method in the plugin. Standard `level.addNewPlayer(entity)` only adds
+      the entity to the world's entity list, missing all network/player tracking systems.
+      `PlayerList.placeNewPlayer(...)` executes the full vanilla player join sequence:
+        1. Registers the player in `ChunkMap` (enabling simulation distance & mob cap participation).
+        2. Allocates `PLAYER` chunk tickets around the entity (keeping chunks loaded and entity-ticking).
+        3. Adds the player to `PlayerList#players` (making them visible to server-wide player iterators).
+        4. Broadcasts entity tracking & tab list packets to all online players.
+
+[D] `net.minecraft.server.players.PlayerList#remove(ServerPlayer)`
+    • WHY IT WAS USED:
+      Used during dummy despawning. Mirrors the vanilla disconnect flow, safely releasing `PLAYER` chunk
+      tickets, untracking the entity from `ChunkMap`, and preventing chunk memory leaks or duplicate entity UUIDs.
+
+[E] `net.minecraft.server.network.CommonListenerCookie`
+    • WHY IT WAS USED:
+      In Paper 26.2 / Minecraft 1.21+, the connection handshake state requires a `CommonListenerCookie` record
+      containing connection state data when passing a player to `PlayerList.placeNewPlayer`.
+    • HOW IT WAS USED:
+      Instantiated via the 7-parameter record constructor:
+      `new CommonListenerCookie(profile, 0, clientInfo, false, "vanilla", Collections.emptySet(), new KeepAlive())`
+
+[F] `net.minecraft.network.Connection`
+    • WHY IT WAS USED:
+      `ServerPlayer` instances require a valid `handle.connection` (`ServerGamePacketListenerImpl`) object to prevent
+      NullPointerExceptions whenever the server ticks player networking, updates tab lists, or broadcasts world events.
+    • HOW IT WAS USED:
+      Instantiated with `Connection(PacketFlow.SERVERBOUND)`. `SERVERBOUND` was specifically chosen because,
+      from the server's perspective, this connection handles incoming client traffic.
+
+--------------------------------------------------------------------------------
+2. NETTY NETWORK INFRASTRUCTURE
+--------------------------------------------------------------------------------
+
+[A] `io.netty.channel.embedded.EmbeddedChannel`
+    • WHY IT WAS USED:
+      Fake players have no physical network socket. Netty's `EmbeddedChannel` provides a lightweight, in-memory
+      channel implementation that allows packet processing calls to execute without throwing socket exceptions.
+
+[B] `ChannelOutboundHandlerAdapter` & `ReferenceCountUtil.release(msg)`
+    • WHY IT WAS USED:
+      Prevents Netty memory leaks. All outbound server packets sent to the fake player are released immediately,
+      preventing `ByteBuf` accumulation in heap memory.
+
+[C] Direct Field Injection (`conn.channel = channel` and `conn.address = channel.remoteAddress()`)
+    • WHY IT WAS USED:
+      `EmbeddedChannel` is already in an "active" state when constructed. When `Connection` is added to its pipeline
+      post-construction, Netty does NOT re-fire the `channelActive()` hook. Without manually setting `conn.channel`
+      and `conn.address`, the internal `channel` reference remains `null`, causing `NullPointerException` during
+      `setupInboundProtocol()` in `placeNewPlayer`. Manually assigning these public fields fixes this issue cleanly.
+
+--------------------------------------------------------------------------------
+3. MOJANG AUTHLIB & SESSION APIS
+--------------------------------------------------------------------------------
+
+[A] `com.mojang.authlib.GameProfile`
+    • WHY IT WAS USED:
+      Identifies the `ServerPlayer` entity with a UUID and display name.
+    • HOW IT WAS USED:
+      Unique session-derived UUID via `UUID.nameUUIDFromBytes(("afkdummy:" + ownerUUID + ":" + sessionId).getBytes())`
+      with compliant `^[a-zA-Z0-9_]{1,16}$` username syntax.
+
+[B] `java.net.http.HttpClient` & Mojang Session Server (`https://sessionserver.mojang.com/`)
+    • WHY IT WAS USED:
+      To render the real player's skin on the fake player NPC.
+    • HOW IT WAS USED:
+      `SkinUtil` asynchronously queries Mojang's session API for the owner's UUID, retrieves the base64 `textures`
+      property and signature, and applies it to the `GameProfile`'s `PropertyMap`.
+
+--------------------------------------------------------------------------------
+4. PAPERMC & BUKKIT APIS
+--------------------------------------------------------------------------------
+
+[A] `org.bukkit.entity.Player#setAffectsSpawning(boolean)` (Paper API)
+    • WHY IT WAS USED:
+      Setting `setAffectsSpawning(true)` on the Bukkit wrapper explicitly forces Paper's mob spawner algorithms
+      to count the dummy entity as a valid player origin for hostile & passive mob caps.
+
+[B] `org.bukkit.inventory.InventoryHolder` (Custom GUI Framework)
+    • WHY IT WAS USED:
+      By implementing `InventoryHolder` in `MenuFramework`, our `GUIListener` can check `inventory.getHolder() instanceof MenuFramework`
+      to instantly identify and cancel unauthorized click/drag interactions, providing 100% security against item duplication.
+
+[C] Adventure API (`net.kyori.adventure.text.Component`)
+    • WHY IT WAS USED:
+      Modern Paper API standard for formatted rich text across chat, action bar, GUI titles, and tab list display names.
+
+--------------------------------------------------------------------------------
+5. BSTATS METRICS & ANALYTICS
+--------------------------------------------------------------------------------
+
+[A] `org.bstats:bstats-bukkit:3.1.0`
+    • WHY IT WAS USED:
+      Industry-standard metrics library for tracking active servers, player counts, Java/server versions,
+      and custom charts (active dummies, payment items, player limits) on bstats.org.
+    • HOW IT WAS USED:
+      Shaded and relocated to `com.plugin.afkdummy.bstats` in `shadowJar`.
+
+--------------------------------------------------------------------------------
+6. BUILD & COMPILATION TOOLCHAIN
+--------------------------------------------------------------------------------
+
+[A] Gradle 9.6.1 & `io.papermc.paperweight.userdev` (2.0.0-beta.21)
+    • WHY IT WAS USED:
+      Paperweight is Paper's official development toolchain that decompiles, patches, and remaps Minecraft Server code
+      to official Mojang Mappings (`net.minecraft.server...`) at compile time. Version `2.0.0-beta.21` mandates Gradle 9.x.
+
+[B] Shadow Plugin (`com.gradleup.shadow` 9.4.3)
+    • WHY IT WAS USED:
+      Bundles external libraries (Gson, bStats) into a single, runnable plugin JAR file.
+
+================================================================================
+Document Complete & Verified for Paper 26.2 Development (v1.0.1)
+================================================================================

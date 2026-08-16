@@ -17,19 +17,17 @@ public final class ItemCostUtil {
     }
 
     /**
-     * Counts the total number of items of a specific material in a player's
-     * entire inventory, including main inventory, hotbar, offhand, and armor slots.
+     * Counts the total number of items of a specific material in a player's inventory storage slots.
      *
      * @param player   the player whose inventory to scan
      * @param material the material to count
-     * @return total item count across all inventory slots
+     * @return total item count across storage slots
      */
     public static int countItems(Player player, Material material) {
         int count = 0;
         PlayerInventory inventory = player.getInventory();
 
-        // Scan all contents (main inventory + hotbar = slots 0-35)
-        for (ItemStack item : inventory.getContents()) {
+        for (ItemStack item : inventory.getStorageContents()) {
             if (item != null && item.getType() == material) {
                 count += item.getAmount();
             }
@@ -52,11 +50,6 @@ public final class ItemCostUtil {
 
     /**
      * Atomically verifies and removes a specified amount of items from the player's inventory.
-     * <p>
-     * This method re-verifies the total item count immediately before deduction to prevent
-     * race conditions where a player might drop items or modify their inventory mid-transaction.
-     * If the re-verification fails, the transaction is aborted and no items are removed.
-     * </p>
      *
      * @param player   the player from whom to remove items
      * @param material the material type to remove
@@ -72,27 +65,26 @@ public final class ItemCostUtil {
         }
 
         int remaining = amount;
-        ItemStack[] contents = inventory.getContents();
+        ItemStack[] storage = inventory.getStorageContents();
 
-        for (int i = 0; i < contents.length && remaining > 0; i++) {
-            ItemStack item = contents[i];
+        for (int i = 0; i < storage.length && remaining > 0; i++) {
+            ItemStack item = storage[i];
             if (item == null || item.getType() != material) {
                 continue;
             }
 
             int stackSize = item.getAmount();
             if (stackSize <= remaining) {
-                // Take the entire stack
                 remaining -= stackSize;
-                inventory.setItem(i, null);
+                storage[i] = null;
             } else {
-                // Partially reduce this stack
                 item.setAmount(stackSize - remaining);
+                storage[i] = item;
                 remaining = 0;
             }
         }
 
-        // Force client inventory update to reflect changes immediately
+        inventory.setStorageContents(storage);
         player.updateInventory();
 
         return remaining == 0;

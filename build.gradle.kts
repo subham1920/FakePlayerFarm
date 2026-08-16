@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.plugin"
-version = "1.0.0"
+version = "1.0.1"
 description = "AFK Dummy - Spawn fake players for chunk loading and farm mechanics"
 
 java {
@@ -19,6 +19,7 @@ repositories {
 dependencies {
     paperweight.paperDevBundle("26.2.build.+")
     implementation("com.google.code.gson:gson:2.13.1")
+    implementation("org.bstats:bstats-bukkit:3.1.0")
 }
 
 tasks.processResources {
@@ -31,6 +32,7 @@ tasks.processResources {
 
 tasks.shadowJar {
     archiveClassifier.set("")
+    relocate("org.bstats", "com.plugin.afkdummy.bstats")
     minimize()
 }
 

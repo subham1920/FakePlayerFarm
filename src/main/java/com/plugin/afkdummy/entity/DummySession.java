@@ -9,12 +9,12 @@ import java.util.UUID;
  * Represents an active dummy player session, wrapping the {@link DummyPlayer}
  * entity with session metadata including expiration time and owner information.
  * <p>
- * Sessions are created when a player purchases an AFK dummy and are tracked
- * by the {@link DummyManager} until they expire or are manually terminated.
+ * Uniquely identified by a {@code sessionId} to support multiple dummies per owner.
  * </p>
  */
 public class DummySession {
 
+    private final UUID sessionId;
     private final DummyPlayer dummyPlayer;
     private final UUID ownerUUID;
     private final String ownerName;
@@ -22,7 +22,26 @@ public class DummySession {
     private final long creationTimestamp;
 
     /**
-     * Creates a new DummySession.
+     * Creates a new DummySession with a specific session ID.
+     *
+     * @param sessionId           unique session ID
+     * @param dummyPlayer         the wrapped dummy player entity
+     * @param ownerUUID           UUID of the player who owns this session
+     * @param ownerName           display name of the owner
+     * @param expirationTimestamp epoch millis when this session expires
+     */
+    public DummySession(UUID sessionId, DummyPlayer dummyPlayer, UUID ownerUUID, String ownerName,
+                        long expirationTimestamp) {
+        this.sessionId = sessionId != null ? sessionId : UUID.randomUUID();
+        this.dummyPlayer = dummyPlayer;
+        this.ownerUUID = ownerUUID;
+        this.ownerName = ownerName;
+        this.expirationTimestamp = expirationTimestamp;
+        this.creationTimestamp = System.currentTimeMillis();
+    }
+
+    /**
+     * Creates a new DummySession, deriving session ID from the dummy player.
      *
      * @param dummyPlayer         the wrapped dummy player entity
      * @param ownerUUID           UUID of the player who owns this session
@@ -31,11 +50,13 @@ public class DummySession {
      */
     public DummySession(DummyPlayer dummyPlayer, UUID ownerUUID, String ownerName,
                         long expirationTimestamp) {
-        this.dummyPlayer = dummyPlayer;
-        this.ownerUUID = ownerUUID;
-        this.ownerName = ownerName;
-        this.expirationTimestamp = expirationTimestamp;
-        this.creationTimestamp = System.currentTimeMillis();
+        this(dummyPlayer != null ? dummyPlayer.getSessionId() : UUID.randomUUID(),
+                dummyPlayer, ownerUUID, ownerName, expirationTimestamp);
+    }
+
+    /** @return the unique session ID */
+    public UUID getSessionId() {
+        return sessionId;
     }
 
     /**
@@ -135,7 +156,7 @@ public class DummySession {
 
     @Override
     public String toString() {
-        return "DummySession{owner=" + ownerName
+        return "DummySession{session=" + sessionId + ", owner=" + ownerName
                 + ", remaining=" + getFormattedTimeRemaining()
                 + ", spawned=" + isSpawned() + "}";
     }

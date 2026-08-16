@@ -10,6 +10,7 @@ import java.io.*;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.logging.Level;
 
@@ -17,8 +18,8 @@ import java.util.logging.Level;
  * Manages persistent storage of dummy player session data using JSON.
  * <p>
  * Data is stored in {@code dummies.json} within the plugin's data folder.
- * Write operations run asynchronously to prevent main thread lag.
- * Thread-safe access is ensured via synchronized blocks on the internal data list.
+ * Write operations run asynchronously using atomic file writes to prevent data corruption.
+ * Thread-safe access is ensured via synchronization.
  * </p>
  */
 public class StorageManager {
@@ -27,8 +28,10 @@ public class StorageManager {
 
     private final Plugin plugin;
     private final File dataFile;
+    private final File tempFile;
     private final Gson gson;
     private final List<DummyData> dataList;
+    private final Object fileLock = new Object();
 
     /**
      * Constructs a new StorageManager.
@@ -38,6 +41,7 @@ public class StorageManager {
     public StorageManager(Plugin plugin) {
         this.plugin = plugin;
         this.dataFile = new File(plugin.getDataFolder(), "dummies.json");
+        this.tempFile = new File(plugin.getDataFolder(), "dummies.json.tmp");
         this.gson = new GsonBuilder().setPrettyPrinting().create();
         this.dataList = new ArrayList<>();
     }
@@ -53,39 +57,44 @@ public class StorageManager {
             return;
         }
 
-        try (Reader reader = new InputStreamReader(
-                new FileInputStream(dataFile), StandardCharsets.UTF_8)) {
-            List<DummyData> loaded = gson.fromJson(reader, DATA_LIST_TYPE);
-            synchronized (dataList) {
-                dataList.clear();
-                if (loaded != null) {
-                    dataList.addAll(loaded);
+        synchronized (fileLock) {
+            try (Reader reader = new InputStreamReader(
+                    new FileInputStream(dataFile), StandardCharsets.UTF_8)) {
+                List<DummyData> loaded = gson.fromJson(reader, DATA_LIST_TYPE);
+                synchronized (dataList) {
+                    dataList.clear();
+                    if (loaded != null) {
+                        dataList.addAll(loaded);
+                    }
                 }
-            }
-            plugin.getLogger().info("Loaded " + dataList.size() + " dummy session(s) from storage.");
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.WARNING,
-                    "Failed to load dummies.json. Data may be corrupt. Starting fresh.", e);
-            synchronized (dataList) {
-                dataList.clear();
+                plugin.getLogger().info("Loaded " + dataList.size() + " dummy session(s) from storage.");
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Failed to load dummies.json. Data may be corrupt. Starting fresh.", e);
+                synchronized (dataList) {
+                    dataList.clear();
+                }
             }
         }
     }
 
     /**
      * Saves all dummy data to the JSON file asynchronously.
-     * Creates parent directories if they don't exist.
+     * Creates parent directories if they don't exist and writes atomically.
      */
     public void saveAsync() {
-        // Create a snapshot of the data under the lock
         final String jsonContent;
         synchronized (dataList) {
             jsonContent = gson.toJson(new ArrayList<>(dataList), DATA_LIST_TYPE);
         }
 
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+        if (plugin.isEnabled()) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                writeToFile(jsonContent);
+            });
+        } else {
             writeToFile(jsonContent);
-        });
+        }
     }
 
     /**
@@ -101,18 +110,27 @@ public class StorageManager {
     }
 
     /**
-     * Internal method to write JSON content to the data file.
+     * Internal atomic method to write JSON content to disk safely.
      */
     private void writeToFile(String jsonContent) {
-        try {
-            File parentDir = dataFile.getParentFile();
-            if (parentDir != null && !parentDir.exists()) {
-                parentDir.mkdirs();
+        synchronized (fileLock) {
+            try {
+                File parentDir = dataFile.getParentFile();
+                if (parentDir != null && !parentDir.exists()) {
+                    parentDir.mkdirs();
+                }
+                // Write to temp file first, then atomically replace data file
+                Files.writeString(tempFile.toPath(), jsonContent, StandardCharsets.UTF_8);
+                Files.move(tempFile.toPath(), dataFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException e) {
+                // If atomic move fails (e.g. filesystem limitations), fallback to direct write
+                try {
+                    Files.writeString(dataFile.toPath(), jsonContent, StandardCharsets.UTF_8);
+                } catch (IOException ex) {
+                    plugin.getLogger().log(Level.SEVERE, "Failed to save dummies.json!", ex);
+                }
             }
-            Files.writeString(dataFile.toPath(), jsonContent, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            plugin.getLogger().log(Level.SEVERE,
-                    "Failed to save dummies.json!", e);
         }
     }
 
@@ -129,17 +147,16 @@ public class StorageManager {
     }
 
     /**
-     * Removes the dummy session entry for a given owner.
+     * Removes a dummy session entry by its unique session ID.
      *
-     * @param ownerUUID the UUID of the dummy's owner
+     * @param sessionId the unique session ID
      * @param save      whether to trigger an asynchronous save
      * @return true if an entry was removed
      */
-    public boolean removeEntry(UUID ownerUUID, boolean save) {
+    public boolean removeEntry(UUID sessionId, boolean save) {
         boolean removed;
         synchronized (dataList) {
-            removed = dataList.removeIf(d ->
-                    ownerUUID.toString().equals(d.getOwnerUniqueId()));
+            removed = dataList.removeIf(d -> sessionId.equals(d.getSessionId()));
         }
         if (removed && save) {
             saveAsync();
@@ -148,26 +165,60 @@ public class StorageManager {
     }
 
     /**
-     * Removes the dummy session entry for a given owner and triggers an async save.
+     * Removes a dummy session entry by its unique session ID and triggers an async save.
      *
-     * @param ownerUUID the UUID of the dummy's owner
+     * @param sessionId the unique session ID
      * @return true if an entry was removed
      */
-    public boolean removeEntry(UUID ownerUUID) {
-        return removeEntry(ownerUUID, true);
+    public boolean removeEntry(UUID sessionId) {
+        return removeEntry(sessionId, true);
     }
 
     /**
-     * Finds a dummy session entry by owner UUID.
+     * Removes all dummy session entries for a given owner UUID.
      *
-     * @param ownerUUID the owner's UUID
+     * @param ownerUUID the UUID of the owner
+     * @param save      whether to trigger an asynchronous save
+     * @return count of entries removed
+     */
+    public int removeByOwner(UUID ownerUUID, boolean save) {
+        int removed;
+        synchronized (dataList) {
+            int before = dataList.size();
+            dataList.removeIf(d -> ownerUUID.toString().equals(d.getOwnerUniqueId()));
+            removed = before - dataList.size();
+        }
+        if (removed > 0 && save) {
+            saveAsync();
+        }
+        return removed;
+    }
+
+    /**
+     * Finds a dummy session entry by session ID.
+     *
+     * @param sessionId the session ID
      * @return an Optional containing the data if found
      */
-    public Optional<DummyData> getByOwner(UUID ownerUUID) {
+    public Optional<DummyData> getBySession(UUID sessionId) {
+        synchronized (dataList) {
+            return dataList.stream()
+                    .filter(d -> sessionId.equals(d.getSessionId()))
+                    .findFirst();
+        }
+    }
+
+    /**
+     * Gets all dummy session entries for a specific owner.
+     *
+     * @param ownerUUID the owner's UUID
+     * @return list of dummy data entries for this owner
+     */
+    public List<DummyData> getEntriesByOwner(UUID ownerUUID) {
         synchronized (dataList) {
             return dataList.stream()
                     .filter(d -> ownerUUID.toString().equals(d.getOwnerUniqueId()))
-                    .findFirst();
+                    .toList();
         }
     }
 

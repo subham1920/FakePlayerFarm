@@ -8,6 +8,9 @@ import com.plugin.afkdummy.listener.PlayerListener;
 import com.plugin.afkdummy.storage.StorageManager;
 import com.plugin.afkdummy.util.SkinUtil;
 import com.plugin.afkdummy.util.DebugLogger;
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
+import org.bstats.charts.SingleLineChart;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -17,21 +20,17 @@ import org.bukkit.plugin.java.JavaPlugin;
  * Main plugin class for the AFK Dummy system.
  * <p>
  * Orchestrates all subsystems including configuration, storage, entity management,
- * GUI framework, and event listeners. Handles the complete plugin lifecycle from
- * enable through disable, including server restart recovery.
+ * GUI framework, event listeners, and bStats metrics reporting.
  * </p>
- *
- * <h3>Lifecycle:</h3>
- * <ol>
- *   <li>{@code onEnable()} — Load config → init storage → register listeners/commands → delayed respawn</li>
- *   <li>{@code onDisable()} — Despawn all dummies → save state synchronously → cleanup</li>
- * </ol>
  */
 public class AFKDummyPlugin extends JavaPlugin {
+
+    private static final int BSTATS_PLUGIN_ID = 24890;
 
     private ConfigManager configManager;
     private StorageManager storageManager;
     private DummyManager dummyManager;
+    private Metrics metrics;
 
     @Override
     public void onEnable() {
@@ -63,9 +62,17 @@ public class AFKDummyPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new GUIListener(), this);
 
         // ====================================================================
-        // 5. Register Commands
+        // 5. Initialize bStats Metrics
         // ====================================================================
-        // Commands are registered via plugin.yml; we handle them in onCommand()
+        try {
+            metrics = new Metrics(this, BSTATS_PLUGIN_ID);
+            metrics.addCustomChart(new SingleLineChart("active_dummies", () -> dummyManager.getActiveCount()));
+            metrics.addCustomChart(new SimplePie("payment_item", () -> configManager.getPaymentItem().name()));
+            metrics.addCustomChart(new SimplePie("max_dummies_per_player", () -> String.valueOf(configManager.getMaxDummiesPerPlayer())));
+            getLogger().info("bStats metrics initialized successfully.");
+        } catch (Exception e) {
+            getLogger().warning("Failed to initialize bStats metrics: " + e.getMessage());
+        }
 
         // ====================================================================
         // 6. Schedule Delayed Respawn from Storage
@@ -95,15 +102,12 @@ public class AFKDummyPlugin extends JavaPlugin {
             // ================================================================
             // 2. Despawn All Active Dummies
             // ================================================================
-            // This must happen BEFORE saving, as it cleans up NMS entities
-            // from the world to prevent ghost/corrupted entities in region files
             dummyManager.despawnAll();
         }
 
         // ====================================================================
         // 3. Save State Synchronously
         // ====================================================================
-        // Use sync save since the scheduler is shutting down
         if (storageManager != null) {
             storageManager.saveSync();
         }
@@ -128,7 +132,7 @@ public class AFKDummyPlugin extends JavaPlugin {
                 return handleAdminCommand(sender, args);
             }
             sender.sendMessage("§e§lAFK Dummy Console Commands:");
-            sender.sendMessage("§7 afkdummy reload §f— Reload config");
+            sender.sendMessage("§7 afkdummy reload §f— Reload config and reschedule tasks");
             sender.sendMessage("§7 afkdummy list §f— List active sessions");
             sender.sendMessage("§7 afkdummy despawnall §f— Remove all dummies");
             return true;
@@ -168,7 +172,10 @@ public class AFKDummyPlugin extends JavaPlugin {
         switch (args[0].toLowerCase()) {
             case "reload" -> {
                 configManager.reload();
-                sender.sendMessage("§a§l✓ §aConfiguration reloaded successfully.");
+                if (dummyManager != null) {
+                    dummyManager.restartCleanupTask();
+                }
+                sender.sendMessage("§a§l✓ §aConfiguration reloaded and tasks updated successfully.");
                 return true;
             }
             case "list" -> {
@@ -177,10 +184,14 @@ public class AFKDummyPlugin extends JavaPlugin {
                     sender.sendMessage("§7No active dummy sessions.");
                 } else {
                     sender.sendMessage("§e§lActive Dummy Sessions (" + sessions.size() + "):");
-                    sessions.forEach((uuid, session) -> {
+                    sessions.forEach((sessionId, session) -> {
+                        org.bukkit.Location loc = session.getLocation();
+                        String locStr = loc != null && loc.getWorld() != null
+                                ? loc.getWorld().getName() + " (" + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ() + ")"
+                                : "Unknown";
                         sender.sendMessage("§7 • §f" + session.getOwnerName()
-                                + " §7— §b" + session.getFormattedTimeRemaining()
-                                + " §7remaining");
+                                + " §7[§e" + locStr + "§7] — §b" + session.getFormattedTimeRemaining()
+                                + " §7remaining (ID: §8" + sessionId.toString().substring(0, 8) + "§7)");
                     });
                 }
                 return true;
@@ -224,5 +235,10 @@ public class AFKDummyPlugin extends JavaPlugin {
     /** @return the dummy entity manager */
     public DummyManager getDummyManager() {
         return dummyManager;
+    }
+
+    /** @return the bStats metrics instance */
+    public Metrics getMetrics() {
+        return metrics;
     }
 }

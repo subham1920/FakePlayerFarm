@@ -4,25 +4,22 @@ import com.plugin.afkdummy.AFKDummyPlugin;
 import com.plugin.afkdummy.config.ConfigManager;
 import com.plugin.afkdummy.entity.DummyManager;
 import com.plugin.afkdummy.entity.DummySession;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * The main menu GUI for the AFK Dummy plugin.
  * <p>
- * Displays three primary options:
+ * Supports multi-dummy management and displays per-player limit progression:
  * <ul>
- *   <li><b>Slot 11</b> — Spawn AFK Dummy: Opens the time selection menu</li>
- *   <li><b>Slot 13</b> — Current Status: Shows active session info or inactive status</li>
- *   <li><b>Slot 15</b> — Force Despawn: Immediately removes the active dummy</li>
+ *   <li><b>Slot 11</b> — Spawn AFK Dummy: Opens duration selection if under limit</li>
+ *   <li><b>Slot 13</b> — Current Status: Displays all active dummy locations & remaining times</li>
+ *   <li><b>Slot 15</b> — Force Despawn: Safely despawns active dummies</li>
+ *   <li><b>Slot 22</b> — Information: Displays server & player dummy statistics</li>
  * </ul>
  * </p>
  */
@@ -51,22 +48,16 @@ public class MainMenu extends MenuFramework {
     private void buildMenu() {
         ConfigManager config = plugin.getConfigManager();
         DummyManager dummyManager = plugin.getDummyManager();
-        boolean hasActive = dummyManager.hasActiveDummy(viewer.getUniqueId());
+
+        int currentCount = dummyManager.getActiveCountByOwner(viewer.getUniqueId());
+        int maxAllowed = config.getMaxDummiesPerPlayer();
+        boolean canSpawn = currentCount < maxAllowed;
+        List<DummySession> sessions = dummyManager.getSessionsByOwner(viewer.getUniqueId());
 
         // ====================================================================
         // Slot 11 — Spawn AFK Dummy
         // ====================================================================
-        if (hasActive) {
-            // Already has a dummy — show disabled option
-            setItem(11, createItem(Material.GRAY_DYE,
-                    "§c§lSpawn AFK Dummy",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§c You already have an active",
-                    "§c dummy. Despawn it first",
-                    "§c to spawn a new one.",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━"
-            ));
-        } else {
+        if (canSpawn) {
             setItem(11, createItem(Material.NETHER_STAR,
                     "§a§lSpawn AFK Dummy",
                     "§7§m━━━━━━━━━━━━━━━━━━━━",
@@ -76,42 +67,58 @@ public class MainMenu extends MenuFramework {
                     "§7 The dummy will keep chunks",
                     "§7 loaded and farms active.",
                     "",
+                    "§7 Active Dummies: §f" + currentCount + "§7/§f" + maxAllowed,
                     "§7 Cost: §f" + config.getCostPerHour() + " "
                             + config.getPaymentItemDisplayName() + "§7/hour",
                     "§7§m━━━━━━━━━━━━━━━━━━━━",
                     "§e§l▶ Click to select duration"
             ), event -> {
                 Player player = (Player) event.getWhoClicked();
-                if (!dummyManager.hasActiveDummy(player.getUniqueId())) {
+                if (dummyManager.canSpawnMore(player.getUniqueId())) {
                     new TimeSelectionMenu(plugin, player).open(player);
+                } else {
+                    player.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit ("
+                            + dummyManager.getActiveCountByOwner(player.getUniqueId()) + "/"
+                            + config.getMaxDummiesPerPlayer() + ")!");
+                    player.closeInventory();
                 }
             });
+        } else {
+            setItem(11, createItem(Material.GRAY_DYE,
+                    "§c§lLimit Reached",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§c You have reached your max",
+                    "§c dummy limit: §f" + currentCount + "§7/§f" + maxAllowed,
+                    "",
+                    "§c Despawn an existing dummy",
+                    "§c to spawn a new one.",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━"
+            ));
         }
 
         // ====================================================================
         // Slot 13 — Status Display
         // ====================================================================
-        Optional<DummySession> sessionOpt = dummyManager.getSession(viewer.getUniqueId());
-        if (sessionOpt.isPresent()) {
-            DummySession session = sessionOpt.get();
-            Location loc = session.getLocation();
-
+        if (!sessions.isEmpty()) {
             List<String> lore = new ArrayList<>();
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
-            lore.add("§7 Status: §a§l● ACTIVE");
+            lore.add("§7 Active Dummies: §a§l" + currentCount + "§7/§f" + maxAllowed);
             lore.add("");
 
-            if (loc != null && loc.getWorld() != null) {
-                lore.add("§7 World: §f" + loc.getWorld().getName());
-                lore.add("§7 Position: §f" + String.format("%.1f, %.1f, %.1f",
-                        loc.getX(), loc.getY(), loc.getZ()));
-            } else {
-                lore.add("§7 Location: §cUnknown");
+            int index = 1;
+            for (DummySession session : sessions) {
+                Location loc = session.getLocation();
+                String worldName = loc != null && loc.getWorld() != null ? loc.getWorld().getName() : "Unknown";
+                String posStr = loc != null ? String.format("%.0f, %.0f, %.0f", loc.getX(), loc.getY(), loc.getZ()) : "?";
+
+                lore.add("§e§lDummy #" + index + ":");
+                lore.add("§7 • Location: §f" + worldName + " (" + posStr + ")");
+                lore.add("§7 • Time Left: §b⏰ " + session.getFormattedTimeRemaining());
+                if (index < sessions.size()) {
+                    lore.add("");
+                }
+                index++;
             }
-
-            lore.add("");
-            lore.add("§7 Time Remaining:");
-            lore.add("§b §l⏰ " + session.getFormattedTimeRemaining());
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
 
             setItem(13, createItem(Material.CLOCK,
@@ -122,10 +129,10 @@ public class MainMenu extends MenuFramework {
             setItem(13, createItem(Material.GRAY_STAINED_GLASS_PANE,
                     "§7§lDummy Status",
                     "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§7 Status: §c§l● INACTIVE",
+                    "§7 Status: §c§l● INACTIVE (0/" + maxAllowed + ")",
                     "",
-                    "§7 You don't have an active",
-                    "§7 AFK dummy at the moment.",
+                    "§7 You don't have any active",
+                    "§7 AFK dummies at the moment.",
                     "",
                     "§7 Use the §aSpawn §7option",
                     "§7 to place one.",
@@ -136,26 +143,43 @@ public class MainMenu extends MenuFramework {
         // ====================================================================
         // Slot 15 — Force Despawn
         // ====================================================================
-        if (hasActive) {
+        if (currentCount > 0) {
+            String despawnLabel = currentCount > 1
+                    ? "§c§lForce Despawn (Nearest/All)"
+                    : "§c§lForce Despawn";
+
+            List<String> despawnLore = new ArrayList<>();
+            despawnLore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
+            despawnLore.add("§7 Immediately remove your active");
+            despawnLore.add("§7 dummy player(s).");
+            despawnLore.add("");
+            if (currentCount > 1) {
+                despawnLore.add("§e Left-Click: §fDespawn Nearest");
+                despawnLore.add("§c Shift-Click: §fDespawn ALL (" + currentCount + ")");
+            } else {
+                despawnLore.add("§e Click: §fDespawn Active Dummy");
+            }
+            despawnLore.add("");
+            despawnLore.add("§c§l ⚠ WARNING:");
+            despawnLore.add("§c No refunds will be issued.");
+            despawnLore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
+
             setItem(15, createItem(Material.BARRIER,
-                    "§c§lForce Despawn",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§7 Immediately remove your",
-                    "§7 active AFK dummy.",
-                    "",
-                    "§c§l ⚠ WARNING:",
-                    "§c No refunds will be issued",
-                    "§c for early termination.",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§c§l▶ Click to despawn"
+                    despawnLabel,
+                    despawnLore.toArray(new String[0])
             ), event -> {
                 Player player = (Player) event.getWhoClicked();
                 player.closeInventory();
 
-                if (dummyManager.despawnDummy(player.getUniqueId())) {
-                    player.sendMessage("§a§l✓ §aYour AFK dummy has been despawned successfully.");
+                if (event.isShiftClick() && currentCount > 1) {
+                    int removed = dummyManager.despawnAllForOwner(player.getUniqueId());
+                    player.sendMessage("§a§l✓ §aDespawned all " + removed + " active dummies.");
                 } else {
-                    player.sendMessage("§c§l✕ §cNo active dummy found to despawn.");
+                    if (dummyManager.despawnNearest(player)) {
+                        player.sendMessage("§a§l✓ §aYour AFK dummy has been despawned successfully.");
+                    } else {
+                        player.sendMessage("§c§l✕ §cNo active dummy found to despawn.");
+                    }
                 }
             });
         } else {
@@ -177,7 +201,8 @@ public class MainMenu extends MenuFramework {
                 "§7 that keep chunks loaded and",
                 "§7 farms running while you're away.",
                 "",
-                "§7 Active Dummies: §f" + dummyManager.getActiveCount()
+                "§7 Your Dummies: §f" + currentCount + "§7/§f" + maxAllowed,
+                "§7 Server Dummies: §f" + dummyManager.getActiveCount()
                         + "§7/" + config.getMaxServerWideDummies(),
                 "§7§m━━━━━━━━━━━━━━━━━━━━"
         ));

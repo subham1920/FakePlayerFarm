@@ -31,8 +31,8 @@ public final class SkinUtil {
 
     private static final String SESSION_URL = "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=false";
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
+        .connectTimeout(Duration.ofSeconds(5))
+        .build();
     private static final ConcurrentHashMap<UUID, Property> SKIN_CACHE = new ConcurrentHashMap<>();
 
     private SkinUtil() {
@@ -41,30 +41,32 @@ public final class SkinUtil {
 
     /**
      * Asynchronously fetches skin data for a player from Mojang's session server.
-     * Results are cached for subsequent calls. The callback is invoked on the
-     * main server thread.
+     * Results are cached for subsequent calls.
      *
      * @param playerUUID the UUID of the player whose skin to fetch
      * @param callback   consumer that receives the skin Property, or null if fetch failed
      * @param plugin     the owning plugin instance for scheduling
      */
     public static void fetchSkinAsync(UUID playerUUID, Consumer<Property> callback, Plugin plugin) {
-        // Check cache first
         Property cached = SKIN_CACHE.get(playerUUID);
         if (cached != null) {
             callback.accept(cached);
             return;
         }
 
-        // Run async to avoid blocking main thread
+        if (!plugin.isEnabled()) {
+            return;
+        }
+
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             Property result = fetchSkinBlocking(playerUUID, plugin);
             if (result != null) {
                 SKIN_CACHE.put(playerUUID, result);
             }
 
-            // Callback on main thread
-            Bukkit.getScheduler().runTask(plugin, () -> callback.accept(result));
+            if (plugin.isEnabled()) {
+                Bukkit.getScheduler().runTask(plugin, () -> callback.accept(result));
+            }
         });
     }
 
@@ -102,12 +104,17 @@ public final class SkinUtil {
             }
 
             JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-            JsonArray properties = json.getAsJsonArray("properties");
+            if (!json.has("properties") || !json.get("properties").isJsonArray()) {
+                plugin.getLogger().warning("No properties array found in Mojang response for " + playerUUID);
+                return null;
+            }
 
+            JsonArray properties = json.getAsJsonArray("properties");
             for (JsonElement element : properties) {
+                if (!element.isJsonObject()) continue;
                 JsonObject prop = element.getAsJsonObject();
-                if ("textures".equals(prop.get("name").getAsString())) {
-                    String value = prop.get("value").getAsString();
+                if (prop.has("name") && "textures".equals(prop.get("name").getAsString())) {
+                    String value = prop.has("value") ? prop.get("value").getAsString() : "";
                     String signature = prop.has("signature")
                             ? prop.get("signature").getAsString()
                             : "";
@@ -126,8 +133,7 @@ public final class SkinUtil {
     }
 
     /**
-     * Safely retrieves properties from a GameProfile using reflection
-     * to support both older class-based and newer record-based authlib versions.
+     * Safely retrieves properties from a GameProfile using reflection.
      */
     private static com.mojang.authlib.properties.PropertyMap getProperties(GameProfile profile) {
         try {
@@ -143,10 +149,6 @@ public final class SkinUtil {
 
     /**
      * Applies a skin texture property to a GameProfile.
-     * Removes any existing "textures" property before applying the new one.
-     *
-     * @param profile  the GameProfile to modify
-     * @param textures the skin Property to apply
      */
     public static void applySkin(GameProfile profile, Property textures) {
         if (profile == null || textures == null) return;
