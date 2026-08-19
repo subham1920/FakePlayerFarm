@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.plugin"
-version = "1.0.3"
+version = "1.0.2"
 description = "AFK Dummy - Spawn fake players for chunk loading and farm mechanics"
 
 java {
