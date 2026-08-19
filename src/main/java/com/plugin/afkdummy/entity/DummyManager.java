@@ -439,8 +439,28 @@ public class DummyManager {
         if (userSessions.isEmpty()) {
             return false;
         }
-        DummySession target = userSessions.get(0);
-        return setDummySkin(target.getSessionId(), skinPlayerName);
+
+        Location playerLoc = player.getLocation();
+        DummySession target = null;
+        double minDistanceSq = Double.MAX_VALUE;
+
+        for (DummySession session : userSessions) {
+            Location loc = session.getLocation();
+            if (loc != null && loc.getWorld() != null && loc.getWorld().equals(playerLoc.getWorld())) {
+                double distSq = loc.distanceSquared(playerLoc);
+                if (distSq < minDistanceSq) {
+                    minDistanceSq = distSq;
+                    target = session;
+                }
+            } else if (target == null) {
+                target = session;
+            }
+        }
+
+        if (target != null) {
+            return setDummySkin(target.getSessionId(), skinPlayerName);
+        }
+        return false;
     }
 
     /**
@@ -464,8 +484,28 @@ public class DummyManager {
         if (userSessions.isEmpty()) {
             return false;
         }
-        DummySession target = userSessions.get(0);
-        return setDummyName(target.getSessionId(), customName);
+
+        Location playerLoc = player.getLocation();
+        DummySession target = null;
+        double minDistanceSq = Double.MAX_VALUE;
+
+        for (DummySession session : userSessions) {
+            Location loc = session.getLocation();
+            if (loc != null && loc.getWorld() != null && loc.getWorld().equals(playerLoc.getWorld())) {
+                double distSq = loc.distanceSquared(playerLoc);
+                if (distSq < minDistanceSq) {
+                    minDistanceSq = distSq;
+                    target = session;
+                }
+            } else if (target == null) {
+                target = session;
+            }
+        }
+
+        if (target != null) {
+            return setDummyName(target.getSessionId(), customName);
+        }
+        return false;
     }
 
     /**

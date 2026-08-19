@@ -95,6 +95,47 @@ public class MainMenu extends MenuFramework {
                 ));
             }
 
+            // Slot 11 — Change Name
+            DummySession primarySession = sessions.get(0);
+            String currentCustomName = primarySession.getCustomName() != null && !primarySession.getCustomName().isEmpty()
+                    ? primarySession.getCustomName()
+                    : "[AFK] " + viewer.getName();
+
+            setItem(11, createItem(Material.NAME_TAG,
+                    "§e§lChange Name",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§7 Set a custom display name",
+                    "§7 for your AFK dummy.",
+                    "",
+                    "§7 Current: §f" + currentCustomName,
+                    "",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§e§l▶ Click to rename via chat"
+            ), event -> {
+                Player player = (Player) event.getWhoClicked();
+                player.closeInventory();
+
+                plugin.getInputManager().requestInput(
+                        player,
+                        com.plugin.afkdummy.gui.InputManager.InputType.RENAME,
+                        primarySession.getSessionId(),
+                        "Please type the new name for your dummy in chat:",
+                        newName -> {
+                            if (newName.length() > 32) {
+                                newName = newName.substring(0, 32);
+                            }
+                            if (dummyManager.setDummyNameForOwner(player, newName)) {
+                                player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + newName);
+                                try {
+                                    player.playSound(player.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
+                                } catch (Throwable ignored) {}
+                            } else {
+                                player.sendMessage("§c§l✕ §cNo active dummy found to rename.");
+                            }
+                        }
+                );
+            });
+
             // Slot 12 — Status Display
             List<String> lore = new ArrayList<>();
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
@@ -130,6 +171,47 @@ public class MainMenu extends MenuFramework {
                     "§b§lDummy Status",
                     lore.toArray(new String[0])
             ));
+
+            // Slot 13 — Change Skin
+            String currentSkinName = primarySession.getSkinName() != null && !primarySession.getSkinName().isEmpty()
+                    ? primarySession.getSkinName()
+                    : viewer.getName() + " (Default)";
+
+            setItem(13, createItem(Material.PLAYER_HEAD,
+                    "§d§lChange Skin",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§7 Apply the skin of any",
+                    "§7 Minecraft player to your dummy.",
+                    "",
+                    "§7 Current Skin: §f" + currentSkinName,
+                    "",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§e§l▶ Click to change skin via chat"
+            ), event -> {
+                Player player = (Player) event.getWhoClicked();
+                player.closeInventory();
+
+                plugin.getInputManager().requestInput(
+                        player,
+                        com.plugin.afkdummy.gui.InputManager.InputType.CHANGE_SKIN,
+                        primarySession.getSessionId(),
+                        "Please type the Minecraft username whose skin you want to apply:",
+                        skinUsername -> {
+                            if (!skinUsername.matches("^[a-zA-Z0-9_]{1,16}$")) {
+                                player.sendMessage("§c§l✕ §cInvalid Minecraft username: §f" + skinUsername);
+                                return;
+                            }
+                            if (dummyManager.setDummySkinForOwner(player, skinUsername)) {
+                                player.sendMessage("§a§l✓ §aFetching and applying skin from §f" + skinUsername + "§a...");
+                                try {
+                                    player.playSound(player.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
+                                } catch (Throwable ignored) {}
+                            } else {
+                                player.sendMessage("§c§l✕ §cNo active dummy found to update.");
+                            }
+                        }
+                );
+            });
 
             // Slot 14 — Teleport Dummy Here
             setItem(14, createItem(Material.ENDER_PEARL,

@@ -34,6 +34,7 @@ public class AFKDummyPlugin extends JavaPlugin {
     private ConfigManager configManager;
     private StorageManager storageManager;
     private DummyManager dummyManager;
+    private com.plugin.afkdummy.gui.InputManager inputManager;
     private Metrics metrics;
 
     @Override
@@ -55,15 +56,18 @@ public class AFKDummyPlugin extends JavaPlugin {
         storageManager.loadSync();
 
         // ====================================================================
-        // 3. Initialize Dummy Manager
+        // 3. Initialize Dummy Manager & Input Manager
         // ====================================================================
         dummyManager = new DummyManager(this, configManager, storageManager);
+        inputManager = new com.plugin.afkdummy.gui.InputManager(this);
+        inputManager.start();
 
         // ====================================================================
         // 4. Register Event Listeners
         // ====================================================================
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new GUIListener(), this);
+        getServer().getPluginManager().registerEvents(inputManager, this);
 
         // ====================================================================
         // 5. Initialize bStats Metrics
@@ -96,6 +100,13 @@ public class AFKDummyPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         getLogger().info("Shutting down AFKDummy...");
+
+        // ====================================================================
+        // 0. Shutdown Input Manager
+        // ====================================================================
+        if (inputManager != null) {
+            inputManager.shutdown();
+        }
 
         // ====================================================================
         // 1. Stop Cleanup Task
@@ -306,5 +317,10 @@ public class AFKDummyPlugin extends JavaPlugin {
     /** @return the bStats metrics instance */
     public Metrics getMetrics() {
         return metrics;
+    }
+
+    /** @return the chat input manager */
+    public com.plugin.afkdummy.gui.InputManager getInputManager() {
+        return inputManager;
     }
 }

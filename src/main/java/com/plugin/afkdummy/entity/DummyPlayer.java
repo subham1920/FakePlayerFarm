@@ -222,12 +222,13 @@ public class DummyPlayer {
      * Changes the dummy's visual display name dynamically.
      */
     public void setCustomDisplayName(String newName) {
-        this.customName = newName;
+        this.customName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : null;
         if (handle != null && handle.getBukkitEntity() != null) {
-            String displayName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : "[AFK] " + ownerName;
+            String displayName = this.customName != null ? this.customName : "[AFK] " + ownerName;
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
+            updateScoreboardTeam();
             resendPlayerInfoToAll();
         }
     }
@@ -236,9 +237,9 @@ public class DummyPlayer {
      * Changes the dummy's skin dynamically to any player's skin by username.
      */
     public void setSkinByName(String newSkinUsername) {
-        this.skinName = newSkinUsername;
-        if (newSkinUsername != null && !newSkinUsername.trim().isEmpty()) {
-            loadCustomSkin(newSkinUsername.trim(), handle.getGameProfile());
+        this.skinName = (newSkinUsername != null && !newSkinUsername.trim().isEmpty()) ? newSkinUsername.trim() : null;
+        if (this.skinName != null) {
+            loadCustomSkin(this.skinName, handle.getGameProfile());
         } else {
             loadOwnerSkin(handle.getGameProfile());
         }
@@ -272,6 +273,9 @@ public class DummyPlayer {
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
 
+            // Authoritative Bukkit teleport to synchronize ChunkMap tracking and player coordinates
+            handle.getBukkitEntity().teleport(spawnLocation, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+
             // Re-enforce position post-spawn
             handle.setPos(spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ());
             handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
@@ -296,6 +300,9 @@ public class DummyPlayer {
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
+
+            // Register Scoreboard Team for in-world nametag display
+            updateScoreboardTeam();
 
             spawned = true;
             resendPlayerInfoToAll();
@@ -324,9 +331,8 @@ public class DummyPlayer {
      */
     private void writeInitialPlayerData(UUID uuid, Location loc) {
         try {
-            ServerLevel level = ((CraftWorld) loc.getWorld()).getHandle();
-            java.io.File worldFolder = ((CraftServer) Bukkit.getServer()).getServer()
-                    .getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            java.io.File worldFolder = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
             if (!worldFolder.exists()) {
                 worldFolder.mkdirs();
             }
@@ -376,8 +382,8 @@ public class DummyPlayer {
      */
     private void deletePlayerData(UUID uuid) {
         try {
-            java.io.File worldFolder = ((CraftServer) Bukkit.getServer()).getServer()
-                    .getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            java.io.File worldFolder = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
             java.io.File playerFile = new java.io.File(worldFolder, uuid + ".dat");
             if (playerFile.exists()) {
                 if (playerFile.delete()) {
@@ -397,8 +403,61 @@ public class DummyPlayer {
     }
 
     /**
-     * Teleports the dummy to a new location.
-     * Updates internal spawnLocation, calls NMS teleportTo, and updates position tracking.
+     * Gets a collision-proof Scoreboard Team name dedicated to this dummy session.
+     */
+    private String getTeamName() {
+        return "afk_" + sessionId.toString().replace("-", "").substring(0, 12);
+    }
+
+    /**
+     * Updates or registers the Scoreboard Team to format the in-world nametag cleanly.
+     */
+    private void updateScoreboardTeam() {
+        try {
+            org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+            String teamName = getTeamName();
+            org.bukkit.scoreboard.Team team = scoreboard.getTeam(teamName);
+            if (team == null) {
+                team = scoreboard.registerNewTeam(teamName);
+            }
+            String profileName = handle.getScoreboardName();
+            if (!team.hasEntry(profileName)) {
+                team.addEntry(profileName);
+            }
+
+            if (customName != null && !customName.trim().isEmpty()) {
+                team.prefix(net.kyori.adventure.text.Component.empty());
+                team.suffix(net.kyori.adventure.text.Component.empty());
+                team.color(net.kyori.adventure.text.format.NamedTextColor.YELLOW);
+            } else {
+                team.prefix(net.kyori.adventure.text.Component.text("[AFK] ").color(net.kyori.adventure.text.format.NamedTextColor.GRAY));
+                team.suffix(net.kyori.adventure.text.Component.empty());
+                team.color(net.kyori.adventure.text.format.NamedTextColor.WHITE);
+            }
+        } catch (Throwable e) {
+            DebugLogger.log("Warning: Failed to update scoreboard team for dummy: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Removes the dummy's Scoreboard Team upon removal.
+     */
+    private void removeScoreboardTeam() {
+        try {
+            org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+            String teamName = getTeamName();
+            org.bukkit.scoreboard.Team team = scoreboard.getTeam(teamName);
+            if (team != null) {
+                team.unregister();
+            }
+        } catch (Throwable e) {
+            DebugLogger.log("Warning: Failed to remove scoreboard team for dummy: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Teleports the dummy to a new location authoritatively.
+     * Updates internal spawnLocation, calls CraftPlayer teleport, and synchronizes coordinates.
      *
      * @param newLocation the destination Location
      */
@@ -411,11 +470,11 @@ public class DummyPlayer {
         }
 
         this.spawnLocation = newLocation.clone();
-        ServerLevel targetLevel = ((CraftWorld) newLocation.getWorld()).getHandle();
 
-        handle.teleportTo(targetLevel, newLocation.getX(), newLocation.getY(), newLocation.getZ(),
-                java.util.Set.of(), newLocation.getYaw(), newLocation.getPitch(), true);
+        // Authoritative Bukkit teleportation updates ChunkMap tracking and player position
+        handle.getBukkitEntity().teleport(newLocation, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
 
+        // Synchronize NMS coordinates
         handle.setPos(newLocation.getX(), newLocation.getY(), newLocation.getZ());
         handle.setRot(newLocation.getYaw(), newLocation.getPitch());
         handle.setOldPosAndRot();
@@ -426,19 +485,30 @@ public class DummyPlayer {
     }
 
     /**
-     * Re-sends player info and entity spawn packets to all online players to refresh the skin.
+     * Re-sends player info and entity spawn packets to all online players to refresh the skin and model.
      */
     private void resendPlayerInfoToAll() {
-        ClientboundPlayerInfoUpdatePacket infoPacket = new ClientboundPlayerInfoUpdatePacket(
+        if (!spawned || handle == null) return;
+
+        // 1. Remove entity from client viewport
+        ClientboundRemoveEntitiesPacket removeEntitiesPacket = new ClientboundRemoveEntitiesPacket(handle.getId());
+
+        // 2. Remove profile from client player-info cache (forces client to reload skin upon ADD_PLAYER)
+        ClientboundPlayerInfoRemovePacket removeInfoPacket = new ClientboundPlayerInfoRemovePacket(java.util.List.of(handle.getUUID()));
+
+        // 3. Add updated profile and skin properties to client player-info map
+        ClientboundPlayerInfoUpdatePacket addInfoPacket = new ClientboundPlayerInfoUpdatePacket(
                 EnumSet.of(
                         ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
                         ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED,
-                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME,
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY
                 ),
                 java.util.List.of(handle)
         );
 
-        ClientboundRemoveEntitiesPacket removePacket = new ClientboundRemoveEntitiesPacket(handle.getId());
+        // 4. Re-spawn entity at updated coordinates
         ClientboundAddEntityPacket spawnPacket = new ClientboundAddEntityPacket(
                 handle.getId(),
                 handle.getUUID(),
@@ -453,22 +523,29 @@ public class DummyPlayer {
                 handle.getYHeadRot()
         );
 
+        // 5. Ensure 3D outer layers (Hat, Jacket, Sleeves, Pants, Cape) are packed
+        handle.getEntityData().set(net.minecraft.world.entity.player.Player.DATA_PLAYER_MODE_CUSTOMISATION, (byte) 127);
         var nonDefault = handle.getEntityData().getNonDefaultValues();
         ClientboundSetEntityDataPacket metaPacket = (nonDefault != null && !nonDefault.isEmpty())
                 ? new ClientboundSetEntityDataPacket(handle.getId(), nonDefault)
                 : null;
 
+        // Broadcast to all online players
         for (Player player : Bukkit.getOnlinePlayers()) {
             ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
             if (nmsPlayer.connection != null) {
-                nmsPlayer.connection.send(infoPacket);
-                nmsPlayer.connection.send(removePacket);
+                nmsPlayer.connection.send(removeEntitiesPacket);
+                nmsPlayer.connection.send(removeInfoPacket);
+                nmsPlayer.connection.send(addInfoPacket);
                 nmsPlayer.connection.send(spawnPacket);
                 if (metaPacket != null) {
                     nmsPlayer.connection.send(metaPacket);
                 }
             }
         }
+
+        // 6. Update scoreboard team display
+        updateScoreboardTeam();
     }
 
     /**
@@ -478,6 +555,12 @@ public class DummyPlayer {
         if (!spawned) return;
 
         try {
+            // Clean up scoreboard team
+            removeScoreboardTeam();
+
+            // Clean up temporary playerdata
+            deletePlayerData(handle.getUUID());
+
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
             server.getPlayerList().remove(handle);
             spawned = false;
@@ -499,6 +582,9 @@ public class DummyPlayer {
      * Emergency fallback removal in case PlayerList.remove() throws.
      */
     private void server_fallbackRemove() {
+        removeScoreboardTeam();
+        deletePlayerData(handle.getUUID());
+
         MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
         server.getPlayerList().getPlayers().remove(handle);
         ServerLevel level = (ServerLevel) handle.level();
@@ -511,7 +597,7 @@ public class DummyPlayer {
      * Sends spawn packets to a specific player (e.g. on join).
      */
     public void sendSpawnPacketsTo(Player player) {
-        if (!spawned) return;
+        if (!spawned || handle == null || player == null || !player.isOnline()) return;
 
         ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
         if (nmsPlayer.connection == null) return;
@@ -520,7 +606,9 @@ public class DummyPlayer {
                 EnumSet.of(
                         ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
                         ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED,
-                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME,
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
+                        ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY
                 ),
                 java.util.List.of(handle)
         );
@@ -542,12 +630,9 @@ public class DummyPlayer {
         nmsPlayer.connection.send(infoPacket);
         nmsPlayer.connection.send(spawnPacket);
 
-        ClientboundSetEntityDataPacket dataPacket = new ClientboundSetEntityDataPacket(
-                handle.getId(),
-                handle.getEntityData().getNonDefaultValues()
-        );
-        if (dataPacket.packedItems() != null && !dataPacket.packedItems().isEmpty()) {
-            nmsPlayer.connection.send(dataPacket);
+        var nonDefault = handle.getEntityData().getNonDefaultValues();
+        if (nonDefault != null && !nonDefault.isEmpty()) {
+            nmsPlayer.connection.send(new ClientboundSetEntityDataPacket(handle.getId(), nonDefault));
         }
     }
 

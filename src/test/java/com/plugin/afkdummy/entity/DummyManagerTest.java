@@ -286,4 +286,77 @@ class DummyManagerTest {
             verify(storage, times(1)).updateLocation(s1, playerLoc);
         }
     }
+
+    @Nested
+    @DisplayName("Skin & Custom Name Operations")
+    class SkinAndNameOperationsTests {
+
+        @Test
+        @DisplayName("setDummySkin updates skin on DummyPlayer and storage")
+        void testSetDummySkin() {
+            UUID s1 = UUID.randomUUID();
+            DummySession session = createMockSession(s1, UUID.randomUUID(), "Steve", 1, null, true);
+            activeSessions.put(s1, session);
+
+            assertTrue(manager.setDummySkin(s1, "Alex"));
+            verify(session.getDummyPlayer(), times(1)).setSkinByName("Alex");
+            verify(storage, times(1)).updateSkinName(s1, "Alex");
+        }
+
+        @Test
+        @DisplayName("setDummyName updates custom name on DummyPlayer and storage")
+        void testSetDummyName() {
+            UUID s1 = UUID.randomUUID();
+            DummySession session = createMockSession(s1, UUID.randomUUID(), "Steve", 1, null, true);
+            activeSessions.put(s1, session);
+
+            assertTrue(manager.setDummyName(s1, "Guard"));
+            verify(session.getDummyPlayer(), times(1)).setCustomDisplayName("Guard");
+            verify(storage, times(1)).updateCustomName(s1, "Guard");
+        }
+
+        @Test
+        @DisplayName("setDummySkinForOwner targets nearest dummy of owner")
+        void testSetDummySkinForOwner() {
+            UUID owner = UUID.randomUUID();
+            World world = mock(World.class);
+            when(world.getName()).thenReturn("world");
+
+            Player player = mock(Player.class);
+            when(player.getUniqueId()).thenReturn(owner);
+            Location playerLoc = new Location(world, 50, 65, 50);
+            when(player.getLocation()).thenReturn(playerLoc);
+
+            UUID s1 = UUID.randomUUID();
+            Location loc1 = new Location(world, 10, 64, 10);
+            DummySession session = createMockSession(s1, owner, "Steve", 1, loc1, true);
+            activeSessions.put(s1, session);
+
+            assertTrue(manager.setDummySkinForOwner(player, "Notch"));
+            verify(session.getDummyPlayer(), times(1)).setSkinByName("Notch");
+            verify(storage, times(1)).updateSkinName(s1, "Notch");
+        }
+
+        @Test
+        @DisplayName("setDummyNameForOwner targets nearest dummy of owner")
+        void testSetDummyNameForOwner() {
+            UUID owner = UUID.randomUUID();
+            World world = mock(World.class);
+            when(world.getName()).thenReturn("world");
+
+            Player player = mock(Player.class);
+            when(player.getUniqueId()).thenReturn(owner);
+            Location playerLoc = new Location(world, 50, 65, 50);
+            when(player.getLocation()).thenReturn(playerLoc);
+
+            UUID s1 = UUID.randomUUID();
+            Location loc1 = new Location(world, 10, 64, 10);
+            DummySession session = createMockSession(s1, owner, "Steve", 1, loc1, true);
+            activeSessions.put(s1, session);
+
+            assertTrue(manager.setDummyNameForOwner(player, "FarmGuard"));
+            verify(session.getDummyPlayer(), times(1)).setCustomDisplayName("FarmGuard");
+            verify(storage, times(1)).updateCustomName(s1, "FarmGuard");
+        }
+    }
 }
