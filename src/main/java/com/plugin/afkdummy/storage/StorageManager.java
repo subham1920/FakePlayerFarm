@@ -241,6 +241,54 @@ public class StorageManager {
     }
 
     /**
+     * Updates the custom visual name of an existing dummy session and saves asynchronously.
+     *
+     * @param sessionId  the unique session ID
+     * @param customName the new custom display name
+     * @return true if an entry was found and updated
+     */
+    public boolean updateCustomName(UUID sessionId, String customName) {
+        boolean updated = false;
+        synchronized (dataList) {
+            for (DummyData data : dataList) {
+                if (sessionId.equals(data.getSessionId())) {
+                    data.setCustomName(customName);
+                    updated = true;
+                    break;
+                }
+            }
+        }
+        if (updated) {
+            saveAsync();
+        }
+        return updated;
+    }
+
+    /**
+     * Updates the custom skin name of an existing dummy session and saves asynchronously.
+     *
+     * @param sessionId the unique session ID
+     * @param skinName  the new skin player username
+     * @return true if an entry was found and updated
+     */
+    public boolean updateSkinName(UUID sessionId, String skinName) {
+        boolean updated = false;
+        synchronized (dataList) {
+            for (DummyData data : dataList) {
+                if (sessionId.equals(data.getSessionId())) {
+                    data.setSkinName(skinName);
+                    updated = true;
+                    break;
+                }
+            }
+        }
+        if (updated) {
+            saveAsync();
+        }
+        return updated;
+    }
+
+    /**
      * Gets all dummy session entries for a specific owner.
      *
      * @param ownerUUID the owner's UUID

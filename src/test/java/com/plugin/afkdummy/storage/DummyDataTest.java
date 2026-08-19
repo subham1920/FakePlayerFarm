@@ -158,5 +158,24 @@ class DummyDataTest {
                 assertEquals(-20.5, loc.getZ());
             }
         }
+
+        @Test
+        @DisplayName("Custom name and skin name serialization and deserialization")
+        void testCustomNameAndSkinSerialization() {
+            UUID sessionId = UUID.randomUUID();
+            UUID ownerUUID = UUID.randomUUID();
+            DummyData original = new DummyData(sessionId, ownerUUID, "Steve", 100,
+                    "world", 10.0, 64.0, 20.0, 0f, 0f, 50000L, "CustomGuard", "Technoblade");
+
+            assertEquals("CustomGuard", original.getCustomName());
+            assertEquals("Technoblade", original.getSkinName());
+
+            String json = gson.toJson(original);
+            DummyData loaded = gson.fromJson(json, DummyData.class);
+
+            assertEquals("CustomGuard", loaded.getCustomName());
+            assertEquals("Technoblade", loaded.getSkinName());
+            assertEquals(sessionId, loaded.getSessionId());
+        }
     }
 }

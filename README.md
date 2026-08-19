@@ -4,7 +4,7 @@
 ![Platform](https://img.shields.io/badge/Platform-PaperMC%2026.2-blue.svg)
 ![Java](https://img.shields.io/badge/Java-25-orange.svg)
 ![Build](https://img.shields.io/badge/Tests-1645%20Passing-success.svg)
-![Version](https://img.shields.io/badge/Version-v1.0.2-purple.svg)
+![Version](https://img.shields.io/badge/Version-v1.0.3-purple.svg)
 
 A high-performance PaperMC plugin that spawns **true NMS `ServerPlayer` fake player entities**. Unlike conventional chunk-loaders (`Chunk#setForceLoaded`), AFK dummies fully participate in the server's simulation loop, triggering **crop growth (random block ticks)**, **farm mechanics**, and **natural mob spawning**.
 
@@ -13,14 +13,16 @@ A high-performance PaperMC plugin that spawns **true NMS `ServerPlayer` fake pla
 ## ✨ Features
 
 - **🌾 True Farm & Crop Loading**: Uses genuine NMS `ServerPlayer` instances with player chunk tickets, triggering random block ticks (sugarcane, bamboo, wheat, cactus, etc.) and mob spawn caps.
-- **✨ Teleport / Relocate Option (`v1.0.2 New`)**: Misplaced your dummy? Use the **Teleport Dummy Here** option in the GUI or `/afkdummy tp` to move your dummy to your current location without losing paid duration or diamonds!
-- **💤 Sleep Ignored Integration (`v1.0.2 Fix`)**: Dummies have `setSleepingIgnored(true)` enabled, so real players can sleep through the night without dummy interference.
-- **🎨 Skin Reflection & AuthLib Compatibility (`v1.0.2 Fix`)**: Safely updates `GameProfile` textures across all AuthLib versions without `UnsupportedOperationException`.
+- **📍 Exact Initial Spawn Placement (`v1.0.3 Fix`)**: Pre-writes target NBT playerdata before injection, preventing dummies from spawning at the world spawn chunk.
+- **🎩 Full 3D Skin Outer Layers (`v1.0.3 Fix`)**: Enables all 7 player model customization layers (hat, jacket, sleeves, pants, cape) with metadata packet syncing.
+- **🎨 Custom Skin & Name Customization (`v1.0.3 New`)**: Set your dummy's skin to any Minecraft player with `/afkdummy skin <player>` and customize its nametag with `/afkdummy name <text>`.
+- **✨ Teleport / Relocate Option**: Misplaced your dummy? Use the **Teleport Dummy Here** option in the GUI or `/afkdummy tp` to move your dummy to your current location without losing paid duration or diamonds!
+- **💤 Sleep Ignored Integration**: Dummies have `setSleepingIgnored(true)` enabled, so real players can sleep through the night without dummy interference.
 - **💰 Customizable Economy & Costs**: Charge per-hour dummy rental using any in-game item (Diamonds, Emeralds, Gold, Netherite, etc.).
 - **👥 Multi-Dummy Management**: Support for multiple active dummies per player, governed by configurable per-player and server-wide limits.
 - **🔒 Exploit-Proof GUI & Protection**: Custom chest GUI menus with drag, shift-click, and hopper theft protection. Dummies are invulnerable, immune to knockback, damage, piston pushing, portals, and vehicle mounting.
-- **💾 Atomic JSON Persistence**: Dummy positions, remaining time, and session IDs persist across server restarts and crashes via `dummies.json`.
-- **🧪 1,600+ Comprehensive Unit Tests**: Validated with over 1,645 unit and parameterized tests.
+- **💾 Atomic JSON Persistence**: Dummy positions, remaining time, custom names, and skins persist across server restarts and crashes via `dummies.json`.
+- **🧪 1,650+ Comprehensive Unit Tests**: Validated with over 1,650 unit and parameterized tests.
 
 ---
 
@@ -32,6 +34,8 @@ A high-performance PaperMC plugin that spawns **true NMS `ServerPlayer` fake pla
 | :--- | :--- | :--- |
 | `/afkdummy` | `/dummy` | Opens the interactive main management GUI |
 | `/afkdummy tp` | `/afkdummy move`, `relocate`, `here` | Teleports your active dummy to your current position |
+| `/afkdummy skin <player>` | — | Sets your dummy's skin to any Minecraft player's skin |
+| `/afkdummy name <text>` | — | Sets a custom visual display name / nametag for your dummy |
 | `/afkdummy list` | — | Lists all active dummy sessions *(Admin)* |
 | `/afkdummy reload` | — | Reloads `config.yml` and restarts cleanup tasks *(Admin)* |
 | `/afkdummy despawnall` | — | Force-despawns all active dummies server-wide *(Admin)* |

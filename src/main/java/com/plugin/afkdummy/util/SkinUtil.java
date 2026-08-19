@@ -35,8 +35,81 @@ public final class SkinUtil {
         .build();
     private static final ConcurrentHashMap<UUID, Property> SKIN_CACHE = new ConcurrentHashMap<>();
 
+    private static final String PROFILE_URL = "https://api.mojang.com/users/profiles/minecraft/%s";
+    private static final ConcurrentHashMap<String, UUID> NAME_TO_UUID_CACHE = new ConcurrentHashMap<>();
+
     private SkinUtil() {
         throw new UnsupportedOperationException("Utility class cannot be instantiated");
+    }
+
+    /**
+     * Asynchronously fetches skin data for a player by their Minecraft username.
+     *
+     * @param username the Minecraft username
+     * @param callback consumer that receives the skin Property, or null if fetch failed
+     * @param plugin   the owning plugin instance for scheduling
+     */
+    public static void fetchSkinByNameAsync(String username, Consumer<Property> callback, Plugin plugin) {
+        if (username == null || username.trim().isEmpty()) {
+            callback.accept(null);
+            return;
+        }
+
+        UUID cachedUUID = NAME_TO_UUID_CACHE.get(username.toLowerCase());
+        if (cachedUUID != null) {
+            fetchSkinAsync(cachedUUID, callback, plugin);
+            return;
+        }
+
+        if (!plugin.isEnabled()) {
+            return;
+        }
+
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            UUID resolved = resolveUUIDByUsername(username, plugin);
+            if (resolved != null) {
+                NAME_TO_UUID_CACHE.put(username.toLowerCase(), resolved);
+                fetchSkinAsync(resolved, callback, plugin);
+            } else {
+                if (plugin.isEnabled()) {
+                    Bukkit.getScheduler().runTask(plugin, () -> callback.accept(null));
+                }
+            }
+        });
+    }
+
+    /**
+     * Blocking call to resolve username to UUID via Mojang API.
+     */
+    private static UUID resolveUUIDByUsername(String username, Plugin plugin) {
+        try {
+            String url = String.format(PROFILE_URL, username.trim());
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                String body = response.body();
+                if (body != null && body.trim().startsWith("{")) {
+                    JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+                    if (json.has("id")) {
+                        String idStr = json.get("id").getAsString();
+                        // Format UUID with dashes (8-4-4-4-12)
+                        String formatted = idStr.replaceFirst(
+                                "(\\w{8})(\\w{4})(\\w{4})(\\w{4})(\\w{12})",
+                                "$1-$2-$3-$4-$5"
+                        );
+                        return UUID.fromString(formatted);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to resolve UUID for username " + username + ": " + e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -205,5 +278,6 @@ public final class SkinUtil {
      */
     public static void clearCache() {
         SKIN_CACHE.clear();
+        NAME_TO_UUID_CACHE.clear();
     }
 }

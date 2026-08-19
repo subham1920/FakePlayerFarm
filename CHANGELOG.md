@@ -2,6 +2,24 @@
 
 All notable changes to the AFKDummy (FakePlayerFarm) plugin are documented in this file.
 
+## [1.0.3] - 2026-08-19
+
+### ✨ Added
+- **Custom Dummy Name & Skin System**:
+  - Added `/afkdummy skin <playerName>` to change your dummy's skin to any Minecraft player.
+  - Added `/afkdummy name <customName>` to customize visual display names and nametags.
+  - Added Mojang Profile API username resolution with multi-level asynchronous caching in `SkinUtil`.
+  - Added `customName` and `skinName` persistence in `dummies.json` across server restarts.
+  - Updated GUI status panel to display custom names and active skin indicators.
+
+### 🐛 Fixed
+- **Initial Spawn Point Bug**:
+  - Pre-writes target coordinates (`Pos`, `Rotation`, `Dimension`, `bukkit.world`) to `playerdata/<uuid>.dat` prior to `placeNewPlayer()` so Paper directly spawns the dummy at the player's exact location rather than falling back to the world spawn chunk.
+- **Missing Skin Outer Layers (3D Hat, Jacket, Sleeves, Pants)**:
+  - Enabled `DATA_PLAYER_MODE_CUSTOMISATION = 127` (0x7F bitmask) in entity metadata and packet synchronization (`ClientboundSetEntityDataPacket`) so all 7 3D secondary skin layers render properly.
+- **Visual Name Tag Formatting**:
+  - Eliminated internal session identifiers (`AFK_xxxx`) from the visual nametag and tab list display, formatting cleanly as `[AFK] <PlayerName>` or custom name.
+
 ## [1.0.2] - 2026-08-19
 
 ### ✨ Added

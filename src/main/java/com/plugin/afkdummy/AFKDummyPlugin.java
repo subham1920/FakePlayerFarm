@@ -165,6 +165,34 @@ public class AFKDummyPlugin extends JavaPlugin {
                 return true;
             }
 
+            if (sub.equals("skin")) {
+                if (args.length < 2) {
+                    player.sendMessage("§c§l✕ §cUsage: /afkdummy skin <playerName>");
+                    return true;
+                }
+                String skinPlayer = args[1];
+                if (dummyManager.setDummySkinForOwner(player, skinPlayer)) {
+                    player.sendMessage("§a§l✓ §aFetching and applying skin from §f" + skinPlayer + "§a...");
+                } else {
+                    player.sendMessage("§c§l✕ §cYou don't have any active AFK dummies to update.");
+                }
+                return true;
+            }
+
+            if (sub.equals("name")) {
+                if (args.length < 2) {
+                    player.sendMessage("§c§l✕ §cUsage: /afkdummy name <customName>");
+                    return true;
+                }
+                String newName = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                if (dummyManager.setDummyNameForOwner(player, newName)) {
+                    player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + newName);
+                } else {
+                    player.sendMessage("§c§l✕ §cYou don't have any active AFK dummies to update.");
+                }
+                return true;
+            }
+
             if (player.hasPermission("afkdummy.admin")) {
                 return handleAdminCommand(player, args);
             } else {
@@ -187,6 +215,8 @@ public class AFKDummyPlugin extends JavaPlugin {
             List<String> completions = new ArrayList<>();
             completions.add("tp");
             completions.add("move");
+            completions.add("skin");
+            completions.add("name");
             if (sender.hasPermission("afkdummy.admin")) {
                 completions.addAll(List.of("reload", "list", "despawnall", "help"));
             }

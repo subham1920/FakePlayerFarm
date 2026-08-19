@@ -87,14 +87,16 @@ public class DummyManager {
     }
 
     /**
-     * Spawns a new AFK dummy at the given location for the specified duration.
+     * Spawns a new AFK dummy at the given location for the specified duration with optional custom name and skin.
      *
-     * @param owner      the player requesting the dummy
-     * @param location   the spawn location
-     * @param durationMs how long the dummy should remain active (in milliseconds)
+     * @param owner       the player requesting the dummy
+     * @param location    the spawn location
+     * @param durationMs  how long the dummy should remain active (in milliseconds)
+     * @param customName  optional custom display name
+     * @param skinName    optional custom skin username
      * @return the created DummySession, or null if spawning failed
      */
-    public DummySession spawnDummy(Player owner, Location location, long durationMs) {
+    public DummySession spawnDummy(Player owner, Location location, long durationMs, String customName, String skinName) {
         if (location == null || location.getWorld() == null) {
             owner.sendMessage("§c§l✕ §cInvalid location: World is not loaded.");
             return null;
@@ -123,8 +125,8 @@ public class DummyManager {
             // Generate unique session ID
             UUID sessionId = UUID.randomUUID();
 
-            // Create the dummy player entity
-            DummyPlayer dummyPlayer = new DummyPlayer(ownerUUID, ownerName, location, sessionId, plugin);
+            // Create the dummy player entity with custom name & skin
+            DummyPlayer dummyPlayer = new DummyPlayer(ownerUUID, ownerName, location, sessionId, customName, skinName, plugin);
 
             // Spawn it into the world
             dummyPlayer.spawn();
@@ -142,7 +144,8 @@ public class DummyManager {
                     location.getWorld().getName(),
                     location.getX(), location.getY(), location.getZ(),
                     location.getYaw(), location.getPitch(),
-                    expirationTimestamp
+                    expirationTimestamp,
+                    customName, skinName
             );
             storage.addEntry(data);
 
@@ -158,6 +161,13 @@ public class DummyManager {
             owner.sendMessage("§c§l✕ §cAn error occurred while spawning your dummy. Please contact an admin.");
             return null;
         }
+    }
+
+    /**
+     * Spawns a new AFK dummy at the given location for the specified duration.
+     */
+    public DummySession spawnDummy(Player owner, Location location, long durationMs) {
+        return spawnDummy(owner, location, durationMs, null, null);
     }
 
     /**
@@ -372,9 +382,10 @@ public class DummyManager {
             }
 
             try {
-                // Create and spawn the dummy with preserved session ID
+                // Create and spawn the dummy with preserved session ID and custom name/skin
                 DummyPlayer dummyPlayer = new DummyPlayer(
-                        data.getOwnerUUID(), data.getOwnerName(), location, sessionId, plugin);
+                        data.getOwnerUUID(), data.getOwnerName(), location, sessionId,
+                        data.getCustomName(), data.getSkinName(), plugin);
                 dummyPlayer.spawn();
 
                 // Create session with the ORIGINAL expiration timestamp
@@ -399,11 +410,62 @@ public class DummyManager {
             }
         }
 
-        // Save any changes (updated entity IDs, removed entries)
-        storage.saveAsync();
+        if (expired > 0 || failed > 0) {
+            storage.saveAsync();
+        }
 
-        plugin.getLogger().info("Dummy restoration complete: "
-                + restored + " restored, " + expired + " expired, " + failed + " failed.");
+        plugin.getLogger().info("Dummy restoration complete. Restored: " + restored
+                + ", Expired: " + expired + ", Failed: " + failed);
+    }
+
+    /**
+     * Changes the skin of a specific dummy session.
+     */
+    public boolean setDummySkin(UUID sessionId, String skinPlayerName) {
+        DummySession session = activeSessions.get(sessionId);
+        if (session == null || !session.isSpawned()) {
+            return false;
+        }
+        session.getDummyPlayer().setSkinByName(skinPlayerName);
+        storage.updateSkinName(sessionId, skinPlayerName);
+        return true;
+    }
+
+    /**
+     * Changes the skin of the player's active dummy (or nearest).
+     */
+    public boolean setDummySkinForOwner(Player player, String skinPlayerName) {
+        List<DummySession> userSessions = getSessionsByOwner(player.getUniqueId());
+        if (userSessions.isEmpty()) {
+            return false;
+        }
+        DummySession target = userSessions.get(0);
+        return setDummySkin(target.getSessionId(), skinPlayerName);
+    }
+
+    /**
+     * Changes the visual name of a specific dummy session.
+     */
+    public boolean setDummyName(UUID sessionId, String customName) {
+        DummySession session = activeSessions.get(sessionId);
+        if (session == null || !session.isSpawned()) {
+            return false;
+        }
+        session.getDummyPlayer().setCustomDisplayName(customName);
+        storage.updateCustomName(sessionId, customName);
+        return true;
+    }
+
+    /**
+     * Changes the visual name of the player's active dummy (or nearest).
+     */
+    public boolean setDummyNameForOwner(Player player, String customName) {
+        List<DummySession> userSessions = getSessionsByOwner(player.getUniqueId());
+        if (userSessions.isEmpty()) {
+            return false;
+        }
+        DummySession target = userSessions.get(0);
+        return setDummyName(target.getSessionId(), customName);
     }
 
     /**

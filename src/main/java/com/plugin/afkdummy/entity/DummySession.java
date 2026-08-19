@@ -154,9 +154,20 @@ public class DummySession {
         return dummyPlayer.isSpawned();
     }
 
+    /** @return custom display name if set */
+    public String getCustomName() {
+        return dummyPlayer.getCustomName();
+    }
+
+    /** @return custom skin username if set */
+    public String getSkinName() {
+        return dummyPlayer.getSkinName();
+    }
+
     @Override
     public String toString() {
         return "DummySession{session=" + sessionId + ", owner=" + ownerName
+                + ", customName=" + getCustomName() + ", skin=" + getSkinName()
                 + ", remaining=" + getFormattedTimeRemaining()
                 + ", spawned=" + isSpawned() + "}";
     }

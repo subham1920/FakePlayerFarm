@@ -107,14 +107,23 @@ public class MainMenu extends MenuFramework {
                 String worldName = loc != null && loc.getWorld() != null ? loc.getWorld().getName() : "Unknown";
                 String posStr = loc != null ? String.format("%.0f, %.0f, %.0f", loc.getX(), loc.getY(), loc.getZ()) : "?";
 
-                lore.add("§e§lDummy #" + index + ":");
+                String header = session.getCustomName() != null && !session.getCustomName().isEmpty()
+                        ? "§e§lDummy #" + index + " (§f" + session.getCustomName() + "§e):"
+                        : "§e§lDummy #" + index + ":";
+                lore.add(header);
                 lore.add("§7 • Location: §f" + worldName + " (" + posStr + ")");
+                if (session.getSkinName() != null && !session.getSkinName().isEmpty()) {
+                    lore.add("§7 • Skin: §f" + session.getSkinName());
+                }
                 lore.add("§7 • Time Left: §b⏰ " + session.getFormattedTimeRemaining());
                 if (index < sessions.size()) {
                     lore.add("");
                 }
                 index++;
             }
+            lore.add("");
+            lore.add("§7 Use §e/afkdummy skin <player> §7or");
+            lore.add("§7 §e/afkdummy name <text> §7to customize!");
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
 
             setItem(12, createItem(Material.CLOCK,

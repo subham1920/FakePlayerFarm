@@ -26,28 +26,28 @@ public class DummyData {
     private float yaw;
     private float pitch;
     private long expirationTimestamp;
+    private String customName;
+    private String skinName;
 
     /** Default constructor required by GSON deserialization. */
     public DummyData() {}
 
     /**
      * Constructs a complete DummyData entry with a unique session ID.
-     *
-     * @param sessionId           unique ID for this specific dummy session
-     * @param ownerUniqueId       UUID of the player who owns this dummy
-     * @param ownerName           display name of the owner
-     * @param dummyEntityId       NMS entity ID of the dummy
-     * @param worldName           name of the world the dummy is in
-     * @param x                   X coordinate
-     * @param y                   Y coordinate
-     * @param z                   Z coordinate
-     * @param yaw                 yaw rotation
-     * @param pitch               pitch rotation
-     * @param expirationTimestamp epoch millis when this session expires
      */
     public DummyData(UUID sessionId, UUID ownerUniqueId, String ownerName, int dummyEntityId,
                      String worldName, double x, double y, double z,
                      float yaw, float pitch, long expirationTimestamp) {
+        this(sessionId, ownerUniqueId, ownerName, dummyEntityId, worldName, x, y, z, yaw, pitch, expirationTimestamp, null, null);
+    }
+
+    /**
+     * Constructs a complete DummyData entry with custom name and skin.
+     */
+    public DummyData(UUID sessionId, UUID ownerUniqueId, String ownerName, int dummyEntityId,
+                     String worldName, double x, double y, double z,
+                     float yaw, float pitch, long expirationTimestamp,
+                     String customName, String skinName) {
         this.sessionId = (sessionId != null ? sessionId : UUID.randomUUID()).toString();
         this.ownerUniqueId = ownerUniqueId.toString();
         this.ownerName = ownerName;
@@ -59,6 +59,8 @@ public class DummyData {
         this.yaw = yaw;
         this.pitch = pitch;
         this.expirationTimestamp = expirationTimestamp;
+        this.customName = customName;
+        this.skinName = skinName;
     }
 
     /** @return the unique session ID */
@@ -149,6 +151,22 @@ public class DummyData {
 
     public void setExpirationTimestamp(long expirationTimestamp) {
         this.expirationTimestamp = expirationTimestamp;
+    }
+
+    public String getCustomName() {
+        return customName;
+    }
+
+    public void setCustomName(String customName) {
+        this.customName = customName;
+    }
+
+    public String getSkinName() {
+        return skinName;
+    }
+
+    public void setSkinName(String skinName) {
+        this.skinName = skinName;
     }
 
     /**

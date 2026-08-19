@@ -206,6 +206,27 @@ class StorageManagerTest {
             // Null location returns false
             assertFalse(sm.updateLocation(sessionId, null));
         }
+
+        @Test
+        @DisplayName("updateCustomName and updateSkinName updates fields and returns true")
+        void testUpdateCustomNameAndSkin() {
+            StorageManager sm = new StorageManager(plugin);
+            UUID sessionId = UUID.randomUUID();
+            UUID ownerUUID = UUID.randomUUID();
+
+            DummyData data = new DummyData(sessionId, ownerUUID, "Steve", 1, "world", 0, 0, 0, 0, 0, 100000L);
+            sm.addEntry(data);
+
+            assertTrue(sm.updateCustomName(sessionId, "SuperGuard"));
+            assertEquals("SuperGuard", sm.getBySession(sessionId).get().getCustomName());
+
+            assertTrue(sm.updateSkinName(sessionId, "Dinnerbone"));
+            assertEquals("Dinnerbone", sm.getBySession(sessionId).get().getSkinName());
+
+            // Non-existent session
+            assertFalse(sm.updateCustomName(UUID.randomUUID(), "Test"));
+            assertFalse(sm.updateSkinName(UUID.randomUUID(), "Test"));
+        }
     }
 
     @Nested

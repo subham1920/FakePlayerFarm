@@ -100,4 +100,22 @@ class SkinUtilTest {
             assertEquals("texture_" + i, properties.get("textures").iterator().next().value());
         }
     }
+
+    @Test
+    @DisplayName("fetchSkinByNameAsync with null or empty returns null via callback immediately")
+    void testFetchSkinByNameAsyncNullOrEmpty() {
+        java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean(false);
+        SkinUtil.fetchSkinByNameAsync(null, prop -> {
+            called.set(true);
+            assertNull(prop);
+        }, null);
+        assertTrue(called.get());
+
+        called.set(false);
+        SkinUtil.fetchSkinByNameAsync("   ", prop -> {
+            called.set(true);
+            assertNull(prop);
+        }, null);
+        assertTrue(called.get());
+    }
 }

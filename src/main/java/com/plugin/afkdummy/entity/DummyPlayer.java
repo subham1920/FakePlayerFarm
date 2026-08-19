@@ -52,6 +52,8 @@ public class DummyPlayer {
     private final String ownerName;
     private Location spawnLocation;
     private final Plugin plugin;
+    private String customName;
+    private String skinName;
 
     /** The spoofed network connection, retained for lifecycle cleanup. */
     private final Connection connection;
@@ -62,20 +64,17 @@ public class DummyPlayer {
     private boolean spawned = false;
 
     /**
-     * Creates a new DummyPlayer with a unique session ID.
-     *
-     * @param ownerUUID the UUID of the player who owns this dummy
-     * @param ownerName the display name of the owner
-     * @param location  the spawn location for the dummy
-     * @param sessionId the unique session ID for this dummy
-     * @param plugin    the owning plugin instance
+     * Creates a new DummyPlayer with full customization support.
      */
-    public DummyPlayer(UUID ownerUUID, String ownerName, Location location, UUID sessionId, Plugin plugin) {
+    public DummyPlayer(UUID ownerUUID, String ownerName, Location location, UUID sessionId,
+                       String customName, String skinName, Plugin plugin) {
         this.sessionId = sessionId != null ? sessionId : UUID.randomUUID();
         this.ownerUUID = ownerUUID;
         this.ownerName = ownerName;
         this.spawnLocation = location.clone();
         this.plugin = plugin;
+        this.customName = customName;
+        this.skinName = skinName;
 
         MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
         ServerLevel level = ((CraftWorld) location.getWorld()).getHandle();
@@ -101,23 +100,24 @@ public class DummyPlayer {
                 java.util.Collections.emptySet(), new io.papermc.paper.util.KeepAlive());
         setupMockPacketListener(server);
 
-        // Load the owner's skin asynchronously
-        loadOwnerSkin(profile);
+        // Load skin asynchronously (custom skin if specified, else owner's skin)
+        if (skinName != null && !skinName.trim().isEmpty()) {
+            loadCustomSkin(skinName.trim(), profile);
+        } else {
+            loadOwnerSkin(profile);
+        }
     }
 
-    /**
-     * Creates a new DummyPlayer, generating a random session ID.
-     */
+    public DummyPlayer(UUID ownerUUID, String ownerName, Location location, UUID sessionId, Plugin plugin) {
+        this(ownerUUID, ownerName, location, sessionId, null, null, plugin);
+    }
+
     public DummyPlayer(UUID ownerUUID, String ownerName, Location location, Plugin plugin) {
-        this(ownerUUID, ownerName, location, UUID.randomUUID(), plugin);
+        this(ownerUUID, ownerName, location, UUID.randomUUID(), null, null, plugin);
     }
 
     /**
      * Creates a spoofed {@link Connection} backed by an {@link EmbeddedChannel} with outbound release handler.
-     * <p>
-     * Memory Leak Fix: Intercepts and releases all outbound packets/buffers to prevent
-     * accumulation in {@code EmbeddedChannel.outboundMessages}.
-     * </p>
      */
     private Connection createSpoofedConnection() {
         EmbeddedChannel channel = new EmbeddedChannel(
@@ -186,7 +186,24 @@ public class DummyPlayer {
     }
 
     /**
-     * Loads the owner's skin asynchronously from Mojang's API and applies it.
+     * Loads a custom skin by player username.
+     */
+    private void loadCustomSkin(String username, GameProfile profile) {
+        SkinUtil.fetchSkinByNameAsync(username, (Property textures) -> {
+            if (textures != null) {
+                SkinUtil.applySkin(profile, textures);
+                if (spawned) {
+                    resendPlayerInfoToAll();
+                }
+            } else {
+                // Fallback to owner skin
+                loadOwnerSkin(profile);
+            }
+        }, plugin);
+    }
+
+    /**
+     * Loads the owner's skin asynchronously and applies it to the GameProfile.
      */
     private void loadOwnerSkin(GameProfile profile) {
         SkinUtil.fetchSkinAsync(ownerUUID, (Property textures) -> {
@@ -202,12 +219,42 @@ public class DummyPlayer {
     }
 
     /**
+     * Changes the dummy's visual display name dynamically.
+     */
+    public void setCustomDisplayName(String newName) {
+        this.customName = newName;
+        if (handle != null && handle.getBukkitEntity() != null) {
+            String displayName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : "[AFK] " + ownerName;
+            handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
+            handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
+            handle.getBukkitEntity().setCustomNameVisible(true);
+            resendPlayerInfoToAll();
+        }
+    }
+
+    /**
+     * Changes the dummy's skin dynamically to any player's skin by username.
+     */
+    public void setSkinByName(String newSkinUsername) {
+        this.skinName = newSkinUsername;
+        if (newSkinUsername != null && !newSkinUsername.trim().isEmpty()) {
+            loadCustomSkin(newSkinUsername.trim(), handle.getGameProfile());
+        } else {
+            loadOwnerSkin(handle.getGameProfile());
+        }
+    }
+
+    public String getCustomName() {
+        return customName;
+    }
+
+    public String getSkinName() {
+        return skinName;
+    }
+
+    /**
      * Spawns the dummy player into the world using placeNewPlayer.
-     * Guarantees coordinates are properly enforced post-injection.
-     * <p>
-     * Deletes any stale playerdata for this dummy's UUID before spawning
-     * to prevent placeNewPlayer from overriding the target position.
-     * </p>
+     * Writes pre-spawn playerdata to guarantee correct initial placement in the target chunk.
      */
     public void spawn() {
         if (spawned) {
@@ -219,21 +266,16 @@ public class DummyPlayer {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
             ServerLevel level = ((CraftWorld) spawnLocation.getWorld()).getHandle();
 
-            // Delete any stale playerdata that could override our target position
-            deletePlayerData(handle.getUUID());
+            // Pre-write playerdata with exact location so placeNewPlayer spawns directly in target chunk
+            writeInitialPlayerData(handle.getUUID(), spawnLocation);
 
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
 
-            // Re-enforce the exact target location AFTER placeNewPlayer
-            // (placeNewPlayer might load old coords from playerdata or world spawn)
+            // Re-enforce position post-spawn
             handle.setPos(spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ());
             handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
             handle.setOldPosAndRot();
-
-            // Force teleport at NMS level to ensure correct position data is sent to all clients
-            handle.teleportTo(level, spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ(),
-                    java.util.Set.of(), spawnLocation.getYaw(), spawnLocation.getPitch(), true);
 
             // Post-spawn configuration
             handle.setGameMode(GameType.SURVIVAL);
@@ -243,15 +285,21 @@ public class DummyPlayer {
             handle.getBukkitEntity().setCollidable(false);
             handle.getBukkitEntity().setAffectsSpawning(true);
 
+            // Enable all 7 player skin model parts (Hat, Jacket, Left/Right Sleeves, Left/Right Pants, Cape)
+            handle.getEntityData().set(net.minecraft.world.entity.player.Player.DATA_PLAYER_MODE_CUSTOMISATION, (byte) 127);
+
             // Exclude dummy from sleep requirement so real players can sleep
             handle.getBukkitEntity().setSleepingIgnored(true);
 
-            // Set tab list display name using Adventure API
-            handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text("[AFK] " + ownerName));
-            handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text("[AFK] " + ownerName));
+            // Set clean tab list display name & nametag using Adventure API
+            String displayName = (customName != null && !customName.trim().isEmpty()) ? customName.trim() : "[AFK] " + ownerName;
+            handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
+            handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
 
             spawned = true;
+            resendPlayerInfoToAll();
+
             plugin.getLogger().info("Spawned AFK dummy for " + ownerName
                     + " at " + formatLocation());
             DebugLogger.log(String.format(
@@ -267,6 +315,58 @@ public class DummyPlayer {
             e.printStackTrace(new java.io.PrintWriter(sw));
             DebugLogger.log(sw.toString());
             throw new IllegalStateException("Dummy spawn failed", e);
+        }
+    }
+
+    /**
+     * Writes pre-configured playerdata NBT file for the dummy to guarantee
+     * placeNewPlayer spawns directly at the target location instead of world spawn.
+     */
+    private void writeInitialPlayerData(UUID uuid, Location loc) {
+        try {
+            ServerLevel level = ((CraftWorld) loc.getWorld()).getHandle();
+            java.io.File worldFolder = ((CraftServer) Bukkit.getServer()).getServer()
+                    .getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
+            if (!worldFolder.exists()) {
+                worldFolder.mkdirs();
+            }
+            java.io.File playerFile = new java.io.File(worldFolder, uuid + ".dat");
+
+            net.minecraft.nbt.CompoundTag root = new net.minecraft.nbt.CompoundTag();
+
+            net.minecraft.nbt.ListTag posList = new net.minecraft.nbt.ListTag();
+            posList.add(net.minecraft.nbt.DoubleTag.valueOf(loc.getX()));
+            posList.add(net.minecraft.nbt.DoubleTag.valueOf(loc.getY()));
+            posList.add(net.minecraft.nbt.DoubleTag.valueOf(loc.getZ()));
+            root.put("Pos", posList);
+
+            net.minecraft.nbt.ListTag rotList = new net.minecraft.nbt.ListTag();
+            rotList.add(net.minecraft.nbt.FloatTag.valueOf(loc.getYaw()));
+            rotList.add(net.minecraft.nbt.FloatTag.valueOf(loc.getPitch()));
+            root.put("Rotation", rotList);
+
+            net.minecraft.nbt.ListTag motionList = new net.minecraft.nbt.ListTag();
+            motionList.add(net.minecraft.nbt.DoubleTag.valueOf(0.0));
+            motionList.add(net.minecraft.nbt.DoubleTag.valueOf(0.0));
+            motionList.add(net.minecraft.nbt.DoubleTag.valueOf(0.0));
+            root.put("Motion", motionList);
+
+            root.putString("Dimension", loc.getWorld().getKey().toString());
+            root.putFloat("FallDistance", 0.0f);
+            root.putShort("Fire", (short) 0);
+            root.putShort("Air", (short) 300);
+            root.putBoolean("OnGround", true);
+            root.putBoolean("Invulnerable", true);
+            root.putInt("playerGameType", 0);
+
+            net.minecraft.nbt.CompoundTag bukkitTag = new net.minecraft.nbt.CompoundTag();
+            bukkitTag.putString("world", loc.getWorld().getName());
+            root.put("bukkit", bukkitTag);
+
+            net.minecraft.nbt.NbtIo.writeCompressed(root, playerFile.toPath());
+            DebugLogger.log("Wrote pre-spawn playerdata for " + uuid + " at " + loc);
+        } catch (Throwable e) {
+            DebugLogger.log("Warning: Failed to write pre-spawn playerdata for " + uuid + ": " + e.getMessage());
         }
     }
 
@@ -353,12 +453,20 @@ public class DummyPlayer {
                 handle.getYHeadRot()
         );
 
+        var nonDefault = handle.getEntityData().getNonDefaultValues();
+        ClientboundSetEntityDataPacket metaPacket = (nonDefault != null && !nonDefault.isEmpty())
+                ? new ClientboundSetEntityDataPacket(handle.getId(), nonDefault)
+                : null;
+
         for (Player player : Bukkit.getOnlinePlayers()) {
             ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
             if (nmsPlayer.connection != null) {
                 nmsPlayer.connection.send(infoPacket);
                 nmsPlayer.connection.send(removePacket);
                 nmsPlayer.connection.send(spawnPacket);
+                if (metaPacket != null) {
+                    nmsPlayer.connection.send(metaPacket);
+                }
             }
         }
     }
