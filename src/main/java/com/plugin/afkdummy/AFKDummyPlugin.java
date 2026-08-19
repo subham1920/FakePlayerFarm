@@ -16,6 +16,10 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Main plugin class for the AFK Dummy system.
  * <p>
@@ -146,8 +150,21 @@ public class AFKDummyPlugin extends JavaPlugin {
             return true;
         }
 
-        // Handle sub-commands for players (requires admin permission)
+        // Handle sub-commands for players
         if (args.length > 0) {
+            String sub = args[0].toLowerCase();
+            if (sub.equals("tp") || sub.equals("move") || sub.equals("relocate") || sub.equals("here")) {
+                if (dummyManager.teleportNearestForOwner(player)) {
+                    player.sendMessage("§a§l✓ §aTeleported your AFK dummy to your current location!");
+                    try {
+                        player.playSound(player.getLocation(), org.bukkit.Sound.ENTITY_ENDERMAN_TELEPORT, 1.0f, 1.0f);
+                    } catch (Throwable ignored) {}
+                } else {
+                    player.sendMessage("§c§l✕ §cYou don't have any active AFK dummies to teleport.");
+                }
+                return true;
+            }
+
             if (player.hasPermission("afkdummy.admin")) {
                 return handleAdminCommand(player, args);
             } else {
@@ -159,6 +176,25 @@ public class AFKDummyPlugin extends JavaPlugin {
         // Default: open the main GUI
         new MainMenu(this, player).open(player);
         return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (!command.getName().equalsIgnoreCase("afkdummy")) {
+            return Collections.emptyList();
+        }
+        if (args.length == 1) {
+            List<String> completions = new ArrayList<>();
+            completions.add("tp");
+            completions.add("move");
+            if (sender.hasPermission("afkdummy.admin")) {
+                completions.addAll(List.of("reload", "list", "despawnall", "help"));
+            }
+            return completions.stream()
+                    .filter(c -> c.toLowerCase().startsWith(args[0].toLowerCase()))
+                    .toList();
+        }
+        return Collections.emptyList();
     }
 
     /**

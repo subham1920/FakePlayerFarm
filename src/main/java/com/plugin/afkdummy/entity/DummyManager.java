@@ -230,6 +230,77 @@ public class DummyManager {
     }
 
     /**
+     * Teleports a specific dummy session to a new location.
+     * Keeps the remaining duration intact and updates persistent storage.
+     *
+     * @param sessionId   the unique session ID
+     * @param newLocation the destination Location
+     * @return true if the dummy was successfully relocated
+     */
+    public boolean teleportDummy(UUID sessionId, Location newLocation) {
+        if (sessionId == null || newLocation == null || newLocation.getWorld() == null) {
+            return false;
+        }
+
+        DummySession session = activeSessions.get(sessionId);
+        if (session == null || !session.isSpawned()) {
+            return false;
+        }
+
+        try {
+            session.getDummyPlayer().teleport(newLocation);
+            storage.updateLocation(sessionId, newLocation);
+
+            plugin.getLogger().info(String.format("Teleported AFK dummy for %s (session %s) to %s, %s",
+                    session.getOwnerName(), sessionId, newLocation.getWorld().getName(),
+                    String.format("%.1f, %.1f, %.1f", newLocation.getX(), newLocation.getY(), newLocation.getZ())));
+            DebugLogger.log(String.format("Teleported dummy session %s for %s to world %s (%.1f, %.1f, %.1f)",
+                    sessionId, session.getOwnerName(), newLocation.getWorld().getName(),
+                    newLocation.getX(), newLocation.getY(), newLocation.getZ()));
+            return true;
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to teleport dummy for session " + sessionId, e);
+            DebugLogger.log("ERROR: Teleport dummy failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Teleports the nearest active dummy owned by the player (or their only dummy) to their current location.
+     *
+     * @param player the player requesting the teleport
+     * @return true if a dummy was relocated
+     */
+    public boolean teleportNearestForOwner(Player player) {
+        List<DummySession> userSessions = getSessionsByOwner(player.getUniqueId());
+        if (userSessions.isEmpty()) {
+            return false;
+        }
+
+        Location playerLoc = player.getLocation();
+        DummySession target = null;
+        double minDistanceSq = Double.MAX_VALUE;
+
+        for (DummySession session : userSessions) {
+            Location loc = session.getLocation();
+            if (loc != null && loc.getWorld() != null && loc.getWorld().equals(playerLoc.getWorld())) {
+                double distSq = loc.distanceSquared(playerLoc);
+                if (distSq < minDistanceSq) {
+                    minDistanceSq = distSq;
+                    target = session;
+                }
+            } else if (target == null) {
+                target = session;
+            }
+        }
+
+        if (target != null) {
+            return teleportDummy(target.getSessionId(), playerLoc);
+        }
+        return false;
+    }
+
+    /**
      * Despawns ALL active dummy players. Called during server shutdown.
      */
     public void despawnAll() {

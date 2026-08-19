@@ -132,29 +132,72 @@ public final class SkinUtil {
         }
     }
 
+    private static final sun.misc.Unsafe UNSAFE;
+    private static final long PROPERTY_MAP_PROPERTIES_OFFSET;
+
+    static {
+        sun.misc.Unsafe unsafe = null;
+        long pmOffset = -1;
+        try {
+            java.lang.reflect.Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            f.setAccessible(true);
+            unsafe = (sun.misc.Unsafe) f.get(null);
+        } catch (Throwable ignored) {}
+
+        if (unsafe != null) {
+            for (java.lang.reflect.Field field : com.mojang.authlib.properties.PropertyMap.class.getDeclaredFields()) {
+                if (!java.lang.reflect.Modifier.isStatic(field.getModifiers()) &&
+                        ("properties".equals(field.getName()) || com.google.common.collect.Multimap.class.isAssignableFrom(field.getType()))) {
+                    try {
+                        pmOffset = unsafe.objectFieldOffset(field);
+                    } catch (Throwable ignored) {}
+                    break;
+                }
+            }
+        }
+        UNSAFE = unsafe;
+        PROPERTY_MAP_PROPERTIES_OFFSET = pmOffset;
+    }
+
     /**
-     * Safely retrieves properties from a GameProfile using reflection.
+     * Safely retrieves properties from a GameProfile.
      */
     private static com.mojang.authlib.properties.PropertyMap getProperties(GameProfile profile) {
-        try {
-            try {
-                return (com.mojang.authlib.properties.PropertyMap) GameProfile.class.getMethod("properties").invoke(profile);
-            } catch (NoSuchMethodException e) {
-                return (com.mojang.authlib.properties.PropertyMap) GameProfile.class.getMethod("getProperties").invoke(profile);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to access GameProfile properties", e);
-        }
+        return profile.properties();
     }
 
     /**
      * Applies a skin texture property to a GameProfile.
+     * <p>
+     * Handles immutable PropertyMap instances by updating the underlying delegate
+     * multimap field inside the PropertyMap via Unsafe.
+     * </p>
      */
     public static void applySkin(GameProfile profile, Property textures) {
         if (profile == null || textures == null) return;
-        com.mojang.authlib.properties.PropertyMap properties = getProperties(profile);
-        properties.removeAll("textures");
-        properties.put("textures", textures);
+        try {
+            com.mojang.authlib.properties.PropertyMap properties = getProperties(profile);
+            if (properties == null) return;
+
+            try {
+                properties.removeAll("textures");
+                properties.put("textures", textures);
+                return;
+            } catch (UnsupportedOperationException ignored) {
+                // Immutable multimap in modern AuthLib, fallback to Unsafe
+            }
+
+            com.google.common.collect.Multimap<String, Property> mutable =
+                    com.google.common.collect.HashMultimap.create(properties);
+            mutable.removeAll("textures");
+            mutable.put("textures", textures);
+
+            if (UNSAFE != null && PROPERTY_MAP_PROPERTIES_OFFSET != -1) {
+                UNSAFE.putObject(properties, PROPERTY_MAP_PROPERTIES_OFFSET, mutable);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to apply skin to GameProfile", e);
+        }
     }
 
     /**

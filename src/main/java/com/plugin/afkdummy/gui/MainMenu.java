@@ -55,51 +55,47 @@ public class MainMenu extends MenuFramework {
         List<DummySession> sessions = dummyManager.getSessionsByOwner(viewer.getUniqueId());
 
         // ====================================================================
-        // Slot 11 — Spawn AFK Dummy
+        // Status & Action Slots
         // ====================================================================
-        if (canSpawn) {
-            setItem(11, createItem(Material.NETHER_STAR,
-                    "§a§lSpawn AFK Dummy",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§7 Spawn an AFK dummy player",
-                    "§7 at your current location.",
-                    "",
-                    "§7 The dummy will keep chunks",
-                    "§7 loaded and farms active.",
-                    "",
-                    "§7 Active Dummies: §f" + currentCount + "§7/§f" + maxAllowed,
-                    "§7 Cost: §f" + config.getCostPerHour() + " "
-                            + config.getPaymentItemDisplayName() + "§7/hour",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§e§l▶ Click to select duration"
-            ), event -> {
-                Player player = (Player) event.getWhoClicked();
-                if (dummyManager.canSpawnMore(player.getUniqueId())) {
-                    new TimeSelectionMenu(plugin, player).open(player);
-                } else {
-                    player.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit ("
-                            + dummyManager.getActiveCountByOwner(player.getUniqueId()) + "/"
-                            + config.getMaxDummiesPerPlayer() + ")!");
-                    player.closeInventory();
-                }
-            });
-        } else {
-            setItem(11, createItem(Material.GRAY_DYE,
-                    "§c§lLimit Reached",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§c You have reached your max",
-                    "§c dummy limit: §f" + currentCount + "§7/§f" + maxAllowed,
-                    "",
-                    "§c Despawn an existing dummy",
-                    "§c to spawn a new one.",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━"
-            ));
-        }
+        if (currentCount > 0) {
+            // Slot 10 — Spawn AFK Dummy
+            if (canSpawn) {
+                setItem(10, createItem(Material.NETHER_STAR,
+                        "§a§lSpawn AFK Dummy",
+                        "§7§m━━━━━━━━━━━━━━━━━━━━",
+                        "§7 Spawn another AFK dummy",
+                        "§7 at your current location.",
+                        "",
+                        "§7 Active Dummies: §f" + currentCount + "§7/§f" + maxAllowed,
+                        "§7 Cost: §f" + config.getCostPerHour() + " "
+                                + config.getPaymentItemDisplayName() + "§7/hour",
+                        "§7§m━━━━━━━━━━━━━━━━━━━━",
+                        "§e§l▶ Click to select duration"
+                ), event -> {
+                    Player player = (Player) event.getWhoClicked();
+                    if (dummyManager.canSpawnMore(player.getUniqueId())) {
+                        new TimeSelectionMenu(plugin, player).open(player);
+                    } else {
+                        player.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit ("
+                                + dummyManager.getActiveCountByOwner(player.getUniqueId()) + "/"
+                                + config.getMaxDummiesPerPlayer() + ")!");
+                        player.closeInventory();
+                    }
+                });
+            } else {
+                setItem(10, createItem(Material.GRAY_DYE,
+                        "§c§lLimit Reached",
+                        "§7§m━━━━━━━━━━━━━━━━━━━━",
+                        "§c You have reached your max",
+                        "§c dummy limit: §f" + currentCount + "§7/§f" + maxAllowed,
+                        "",
+                        "§c Despawn an existing dummy",
+                        "§c to spawn a new one.",
+                        "§7§m━━━━━━━━━━━━━━━━━━━━"
+                ));
+            }
 
-        // ====================================================================
-        // Slot 13 — Status Display
-        // ====================================================================
-        if (!sessions.isEmpty()) {
+            // Slot 12 — Status Display
             List<String> lore = new ArrayList<>();
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
             lore.add("§7 Active Dummies: §a§l" + currentCount + "§7/§f" + maxAllowed);
@@ -121,29 +117,38 @@ public class MainMenu extends MenuFramework {
             }
             lore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
 
-            setItem(13, createItem(Material.CLOCK,
+            setItem(12, createItem(Material.CLOCK,
                     "§b§lDummy Status",
                     lore.toArray(new String[0])
             ));
-        } else {
-            setItem(13, createItem(Material.GRAY_STAINED_GLASS_PANE,
-                    "§7§lDummy Status",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━",
-                    "§7 Status: §c§l● INACTIVE (0/" + maxAllowed + ")",
-                    "",
-                    "§7 You don't have any active",
-                    "§7 AFK dummies at the moment.",
-                    "",
-                    "§7 Use the §aSpawn §7option",
-                    "§7 to place one.",
-                    "§7§m━━━━━━━━━━━━━━━━━━━━"
-            ));
-        }
 
-        // ====================================================================
-        // Slot 15 — Force Despawn
-        // ====================================================================
-        if (currentCount > 0) {
+            // Slot 14 — Teleport Dummy Here
+            setItem(14, createItem(Material.ENDER_PEARL,
+                    "§d§lTeleport Dummy Here",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§7 Relocate your active AFK",
+                    "§7 dummy to your current location.",
+                    "",
+                    "§a✓ Keeps remaining time active!",
+                    "§a✓ No diamonds/cost consumed.",
+                    "",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§e§l▶ Click to teleport here"
+            ), event -> {
+                Player player = (Player) event.getWhoClicked();
+                player.closeInventory();
+
+                if (dummyManager.teleportNearestForOwner(player)) {
+                    player.sendMessage("§a§l✓ §aTeleported your AFK dummy to your current location!");
+                    try {
+                        player.playSound(player.getLocation(), org.bukkit.Sound.ENTITY_ENDERMAN_TELEPORT, 1.0f, 1.0f);
+                    } catch (Throwable ignored) {}
+                } else {
+                    player.sendMessage("§c§l✕ §cNo active dummy found to teleport.");
+                }
+            });
+
+            // Slot 16 — Force Despawn
             String despawnLabel = currentCount > 1
                     ? "§c§lForce Despawn (Nearest/All)"
                     : "§c§lForce Despawn";
@@ -164,7 +169,7 @@ public class MainMenu extends MenuFramework {
             despawnLore.add("§c No refunds will be issued.");
             despawnLore.add("§7§m━━━━━━━━━━━━━━━━━━━━");
 
-            setItem(15, createItem(Material.BARRIER,
+            setItem(16, createItem(Material.BARRIER,
                     despawnLabel,
                     despawnLore.toArray(new String[0])
             ), event -> {
@@ -183,6 +188,44 @@ public class MainMenu extends MenuFramework {
                 }
             });
         } else {
+            // Inactive state: Slot 11 Spawn, Slot 13 Status, Slot 15 Despawn (disabled)
+            setItem(11, createItem(Material.NETHER_STAR,
+                    "§a§lSpawn AFK Dummy",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§7 Spawn an AFK dummy player",
+                    "§7 at your current location.",
+                    "",
+                    "§7 The dummy will keep chunks",
+                    "§7 loaded and farms active.",
+                    "",
+                    "§7 Active Dummies: §f0§7/§f" + maxAllowed,
+                    "§7 Cost: §f" + config.getCostPerHour() + " "
+                            + config.getPaymentItemDisplayName() + "§7/hour",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§e§l▶ Click to select duration"
+            ), event -> {
+                Player player = (Player) event.getWhoClicked();
+                if (dummyManager.canSpawnMore(player.getUniqueId())) {
+                    new TimeSelectionMenu(plugin, player).open(player);
+                } else {
+                    player.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit!");
+                    player.closeInventory();
+                }
+            });
+
+            setItem(13, createItem(Material.GRAY_STAINED_GLASS_PANE,
+                    "§7§lDummy Status",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━",
+                    "§7 Status: §c§l● INACTIVE (0/" + maxAllowed + ")",
+                    "",
+                    "§7 You don't have any active",
+                    "§7 AFK dummies at the moment.",
+                    "",
+                    "§7 Use the §aSpawn §7option",
+                    "§7 to place one.",
+                    "§7§m━━━━━━━━━━━━━━━━━━━━"
+            ));
+
             setItem(15, createItem(Material.GRAY_DYE,
                     "§7§lForce Despawn",
                     "§7§m━━━━━━━━━━━━━━━━━━━━",

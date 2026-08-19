@@ -209,6 +209,38 @@ public class StorageManager {
     }
 
     /**
+     * Updates the stored location of an existing dummy session and saves asynchronously.
+     *
+     * @param sessionId   the unique session ID
+     * @param newLocation the updated Location
+     * @return true if an entry was found and updated
+     */
+    public boolean updateLocation(UUID sessionId, org.bukkit.Location newLocation) {
+        if (newLocation == null || newLocation.getWorld() == null) {
+            return false;
+        }
+        boolean updated = false;
+        synchronized (dataList) {
+            for (DummyData data : dataList) {
+                if (sessionId.equals(data.getSessionId())) {
+                    data.setWorldName(newLocation.getWorld().getName());
+                    data.setX(newLocation.getX());
+                    data.setY(newLocation.getY());
+                    data.setZ(newLocation.getZ());
+                    data.setYaw(newLocation.getYaw());
+                    data.setPitch(newLocation.getPitch());
+                    updated = true;
+                    break;
+                }
+            }
+        }
+        if (updated) {
+            saveAsync();
+        }
+        return updated;
+    }
+
+    /**
      * Gets all dummy session entries for a specific owner.
      *
      * @param ownerUUID the owner's UUID

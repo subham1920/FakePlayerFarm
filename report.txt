@@ -4,7 +4,7 @@
 ================================================================================
 
 Project Title   : FakePlayerFarm (AFKDummy)
-Version         : 1.0.1
+Version         : 1.0.2
 Target Platform : PaperMC 26.2 (Minecraft 1.21+ / Mojang Mappings)
 JDK Toolchain   : Java 25 (OpenJDK)
 Build System    : Gradle 9.6.1 (with paperweight-userdev 2.0.0-beta.21 & Shadow 9.4.3)

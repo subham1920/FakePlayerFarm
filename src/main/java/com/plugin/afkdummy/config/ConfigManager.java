@@ -49,11 +49,19 @@ public class ConfigManager {
         if (itemName != null && itemName.toUpperCase().startsWith("MINECRAFT:")) {
             itemName = itemName.substring("MINECRAFT:".length());
         }
-        paymentItem = Material.matchMaterial(itemName != null ? itemName : "DIAMOND");
-        if (paymentItem == null || !paymentItem.isItem()) {
-            logger.warning("Invalid payment-item '" + itemName
-                    + "' in config.yml. Defaulting to DIAMOND.");
-            paymentItem = Material.DIAMOND;
+        try {
+            paymentItem = Material.matchMaterial(itemName != null ? itemName : "DIAMOND");
+            if (paymentItem == null || !paymentItem.isItem()) {
+                logger.warning("Invalid payment-item '" + itemName
+                        + "' in config.yml. Defaulting to DIAMOND.");
+                paymentItem = Material.DIAMOND;
+            }
+        } catch (Throwable t) {
+            try {
+                paymentItem = Material.valueOf(itemName != null ? itemName.toUpperCase() : "DIAMOND");
+            } catch (Exception e) {
+                paymentItem = Material.DIAMOND;
+            }
         }
 
         // Limits

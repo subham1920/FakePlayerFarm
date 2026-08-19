@@ -4,7 +4,7 @@
 ================================================================================
 
 Target Environment: PaperMC 26.2 (Minecraft 1.21+ / Mojang Mappings)
-Plugin Version    : 1.0.1
+Plugin Version    : 1.0.2
 Language & JDK    : Java 25 (Standard Edition)
 Build Toolchain   : Gradle 9.6.1, Paperweight Userdev 2.0.0-beta.21, Shadow 9.4.3, bStats 3.1.0
 

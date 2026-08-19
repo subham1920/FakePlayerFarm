@@ -50,7 +50,7 @@ public class DummyPlayer {
     private final ServerPlayer handle;
     private final UUID ownerUUID;
     private final String ownerName;
-    private final Location spawnLocation;
+    private Location spawnLocation;
     private final Plugin plugin;
 
     /** The spoofed network connection, retained for lifecycle cleanup. */
@@ -204,6 +204,10 @@ public class DummyPlayer {
     /**
      * Spawns the dummy player into the world using placeNewPlayer.
      * Guarantees coordinates are properly enforced post-injection.
+     * <p>
+     * Deletes any stale playerdata for this dummy's UUID before spawning
+     * to prevent placeNewPlayer from overriding the target position.
+     * </p>
      */
     public void spawn() {
         if (spawned) {
@@ -213,6 +217,10 @@ public class DummyPlayer {
 
         try {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            ServerLevel level = ((CraftWorld) spawnLocation.getWorld()).getHandle();
+
+            // Delete any stale playerdata that could override our target position
+            deletePlayerData(handle.getUUID());
 
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
@@ -223,6 +231,10 @@ public class DummyPlayer {
             handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
             handle.setOldPosAndRot();
 
+            // Force teleport at NMS level to ensure correct position data is sent to all clients
+            handle.teleportTo(level, spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ(),
+                    java.util.Set.of(), spawnLocation.getYaw(), spawnLocation.getPitch(), true);
+
             // Post-spawn configuration
             handle.setGameMode(GameType.SURVIVAL);
             handle.setInvulnerable(true);
@@ -230,6 +242,9 @@ public class DummyPlayer {
             handle.setSilent(true);
             handle.getBukkitEntity().setCollidable(false);
             handle.getBukkitEntity().setAffectsSpawning(true);
+
+            // Exclude dummy from sleep requirement so real players can sleep
+            handle.getBukkitEntity().setSleepingIgnored(true);
 
             // Set tab list display name using Adventure API
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text("[AFK] " + ownerName));
@@ -253,6 +268,61 @@ public class DummyPlayer {
             DebugLogger.log(sw.toString());
             throw new IllegalStateException("Dummy spawn failed", e);
         }
+    }
+
+    /**
+     * Deletes any stale playerdata file for the given UUID to prevent
+     * placeNewPlayer from loading old coordinates or state.
+     */
+    private void deletePlayerData(UUID uuid) {
+        try {
+            java.io.File worldFolder = ((CraftServer) Bukkit.getServer()).getServer()
+                    .getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).toFile();
+            java.io.File playerFile = new java.io.File(worldFolder, uuid + ".dat");
+            if (playerFile.exists()) {
+                if (playerFile.delete()) {
+                    DebugLogger.log("Deleted stale playerdata for dummy UUID: " + uuid);
+                } else {
+                    plugin.getLogger().warning("Could not delete stale playerdata for dummy UUID: " + uuid);
+                }
+            }
+            // Also try .dat_old backup
+            java.io.File playerFileOld = new java.io.File(worldFolder, uuid + ".dat_old");
+            if (playerFileOld.exists()) {
+                playerFileOld.delete();
+            }
+        } catch (Exception e) {
+            DebugLogger.log("Warning: Failed to clean playerdata for UUID " + uuid + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Teleports the dummy to a new location.
+     * Updates internal spawnLocation, calls NMS teleportTo, and updates position tracking.
+     *
+     * @param newLocation the destination Location
+     */
+    public void teleport(Location newLocation) {
+        if (!spawned || handle == null) {
+            throw new IllegalStateException("Cannot teleport an unspawned dummy");
+        }
+        if (newLocation == null || newLocation.getWorld() == null) {
+            throw new IllegalArgumentException("Target location and world cannot be null");
+        }
+
+        this.spawnLocation = newLocation.clone();
+        ServerLevel targetLevel = ((CraftWorld) newLocation.getWorld()).getHandle();
+
+        handle.teleportTo(targetLevel, newLocation.getX(), newLocation.getY(), newLocation.getZ(),
+                java.util.Set.of(), newLocation.getYaw(), newLocation.getPitch(), true);
+
+        handle.setPos(newLocation.getX(), newLocation.getY(), newLocation.getZ());
+        handle.setRot(newLocation.getYaw(), newLocation.getPitch());
+        handle.setOldPosAndRot();
+
+        resendPlayerInfoToAll();
+        DebugLogger.log(String.format("Teleported dummy %s (session %s) to %s",
+                ownerName, sessionId, formatLocation()));
     }
 
     /**
