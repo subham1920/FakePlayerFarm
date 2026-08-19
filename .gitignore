@@ -4,6 +4,11 @@
 .gradle/
 build/
 out/
+bin/
+*.class
+*.jar
+*.war
+*.ear
 !gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
 
@@ -13,21 +18,44 @@ out/
 .paperweight/
 run/
 cache/
+logs/
+crash-reports/
+world/
+world_nether/
+world_the_end/
 
 # ==============================================
-# IDEs & Text Editors
+# IDEs, Editors & Tooling
 # ==============================================
+# IntelliJ IDEA
 .idea/
 *.iml
 *.ipr
 *.iws
-.vscode/
+.run/
+
+# Eclipse
 .classpath
 .project
 .settings/
-bin/
+.factorypath
+
+# VS Code
+.vscode/
+
+# Sublime, Fleet & NetBeans
 *.sublime-workspace
 *.sublime-project
+.nb-gradle/
+nbproject/
+.fleet/
+
+# Editor Swap & Temp Files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
 
 # ==============================================
 # OS Generated Files
@@ -41,11 +69,15 @@ ehthumbs.db
 Thumbs.db
 
 # ==============================================
-# Logs, Temp Files & Runtime Data
+# Java & JVM Crash Logs
+# ==============================================
+hs_err_pid*
+replay_pid*
+
+# ==============================================
+# Logs & Runtime Data
 # ==============================================
 *.log
-*.tmp
-*.bak
 debug.log
 dummies.json
 dummies.json.tmp
