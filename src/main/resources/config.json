@@ -6,6 +6,10 @@
     "max-dummies-per-player": 1,
     "max-server-wide-dummies": 20,
     "cleanup-interval-seconds": 30,
-    "respawn-delay-ticks": 40
+    "respawn-delay-ticks": 40,
+    "update-checker": {
+      "enabled": true,
+      "notify-players": true
+    }
   }
 }

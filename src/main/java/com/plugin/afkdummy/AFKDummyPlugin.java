@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.UUID;
 import com.plugin.afkdummy.entity.DummySession;
 import com.plugin.afkdummy.entity.DummyPlayer;
+import com.plugin.afkdummy.util.UpdateChecker;
 
 /**
  * Main plugin class for the AFK Dummy system.
@@ -40,6 +41,7 @@ public class AFKDummyPlugin extends JavaPlugin {
     private StorageManager storageManager;
     private DummyManager dummyManager;
     private com.plugin.afkdummy.gui.InputManager inputManager;
+    private UpdateChecker updateChecker;
     private Metrics metrics;
 
     @Override
@@ -96,6 +98,12 @@ public class AFKDummyPlugin extends JavaPlugin {
             dummyManager.respawnFromStorage();
             dummyManager.startCleanupTask();
         }, respawnDelay);
+
+        // ====================================================================
+        // 7. Asynchronous Update Checker
+        // ====================================================================
+        updateChecker = new UpdateChecker(this);
+        updateChecker.checkForUpdatesAsync();
 
         long elapsed = System.currentTimeMillis() - startTime;
         getLogger().info("AFKDummy v" + getDescription().getVersion()
@@ -216,6 +224,16 @@ public class AFKDummyPlugin extends JavaPlugin {
                 return true;
             }
 
+            if (sub.equals("bugreport") || sub.equals("report") || sub.equals("bug")) {
+                net.kyori.adventure.text.Component bugReportMsg = net.kyori.adventure.text.Component.text("[AFKDummy] ", net.kyori.adventure.text.format.NamedTextColor.GOLD, net.kyori.adventure.text.format.TextDecoration.BOLD)
+                        .append(net.kyori.adventure.text.Component.text("Found a bug? Please report it to the owner on Discord: ", net.kyori.adventure.text.format.NamedTextColor.YELLOW))
+                        .append(net.kyori.adventure.text.Component.text("over._.simplified", net.kyori.adventure.text.format.NamedTextColor.AQUA, net.kyori.adventure.text.format.TextDecoration.UNDERLINED)
+                                .clickEvent(net.kyori.adventure.text.event.ClickEvent.copyToClipboard("over._.simplified"))
+                                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(net.kyori.adventure.text.Component.text("Click to copy Discord username: over._.simplified", net.kyori.adventure.text.format.NamedTextColor.GRAY))));
+                player.sendMessage(bugReportMsg);
+                return true;
+            }
+
             if (player.hasPermission("afkdummy.admin")) {
                 return handleAdminCommand(player, args);
             } else {
@@ -240,8 +258,9 @@ public class AFKDummyPlugin extends JavaPlugin {
             completions.add("move");
             completions.add("skin");
             completions.add("name");
+            completions.add("bugreport");
             if (sender.hasPermission("afkdummy.admin")) {
-                completions.addAll(List.of("reload", "list", "despawnall", "help"));
+                completions.addAll(List.of("reload", "list", "despawnall", "debug", "help"));
             }
             return completions.stream()
                     .filter(c -> c.toLowerCase().startsWith(args[0].toLowerCase()))
@@ -340,9 +359,14 @@ public class AFKDummyPlugin extends JavaPlugin {
                 sender.sendMessage("§aFull state snapshot written to §fplugins/AFKDummy/latest-debug.txt");
                 return true;
             }
+            case "bugreport", "report", "bug" -> {
+                sender.sendMessage("§6§l[AFKDummy] §eFound a bug? Please report it to the owner on Discord: §bover._.simplified");
+                return true;
+            }
             case "help" -> {
                 sender.sendMessage("§e§lAFK Dummy Admin Commands:");
                 sender.sendMessage("§7 /afkdummy §f— Open the GUI");
+                sender.sendMessage("§7 /afkdummy bugreport §f— Report bugs to the owner on Discord");
                 sender.sendMessage("§7 /afkdummy reload §f— Reload config");
                 sender.sendMessage("§7 /afkdummy list §f— List active sessions");
                 sender.sendMessage("§7 /afkdummy despawnall §f— Remove all dummies");
@@ -383,5 +407,10 @@ public class AFKDummyPlugin extends JavaPlugin {
     /** @return the chat input manager */
     public com.plugin.afkdummy.gui.InputManager getInputManager() {
         return inputManager;
+    }
+
+    /** @return the asynchronous update checker */
+    public UpdateChecker getUpdateChecker() {
+        return updateChecker;
     }
 }

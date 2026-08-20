@@ -21,3 +21,6 @@ permissions:
   afkdummy.admin:
     description: Admin permissions for AFK Dummy management
     default: op
+  afkdummy.update:
+    description: Allows receiving plugin update notifications
+    default: op

@@ -35,6 +35,8 @@ public class ConfigManager {
     private int maxServerWideDummies;
     private int cleanupIntervalSeconds;
     private int respawnDelayTicks;
+    private boolean updateCheckerEnabled;
+    private boolean notifyUpdatesEnabled;
 
     /**
      * Constructs a ConfigManager and immediately loads the configuration.
@@ -121,6 +123,20 @@ public class ConfigManager {
 
         int rawRespawn = getIntFromObj(obj, 40, "respawn-delay-ticks", "respawn_delay_ticks", "respawn-delay");
         this.respawnDelayTicks = Math.max(1, rawRespawn);
+
+        // 6. Update Checker
+        if (obj.has("update-checker") && obj.get("update-checker").isJsonObject()) {
+            JsonObject uc = obj.getAsJsonObject("update-checker");
+            this.updateCheckerEnabled = getBooleanFromObj(uc, true, "enabled");
+            this.notifyUpdatesEnabled = getBooleanFromObj(uc, true, "notify-players", "notify_players", "notify");
+        } else if (obj.has("update_checker") && obj.get("update_checker").isJsonObject()) {
+            JsonObject uc = obj.getAsJsonObject("update_checker");
+            this.updateCheckerEnabled = getBooleanFromObj(uc, true, "enabled");
+            this.notifyUpdatesEnabled = getBooleanFromObj(uc, true, "notify-players", "notify_players", "notify");
+        } else {
+            this.updateCheckerEnabled = getBooleanFromObj(obj, true, "update-checker-enabled", "update_checker_enabled", "update-checker");
+            this.notifyUpdatesEnabled = getBooleanFromObj(obj, true, "update-checker-notify-players", "update_checker_notify_players");
+        }
     }
 
     private void parseFromYaml() {
@@ -148,6 +164,10 @@ public class ConfigManager {
         // 5. Timing
         cleanupIntervalSeconds = Math.max(5, cfg.getInt("settings.cleanup-interval-seconds", 30));
         respawnDelayTicks = Math.max(1, cfg.getInt("settings.respawn-delay-ticks", 40));
+
+        // 6. Update Checker
+        updateCheckerEnabled = cfg.getBoolean("settings.update-checker.enabled", true);
+        notifyUpdatesEnabled = cfg.getBoolean("settings.update-checker.notify-players", true);
     }
 
     private int getIntFromObj(JsonObject obj, int def, String... keys) {
@@ -203,6 +223,23 @@ public class ConfigManager {
         return fallback;
     }
 
+    private boolean getBooleanFromObj(JsonObject obj, boolean def, String... keys) {
+        for (String k : keys) {
+            if (obj.has(k)) {
+                JsonElement elem = obj.get(k);
+                if (elem.isJsonPrimitive()) {
+                    if (elem.getAsJsonPrimitive().isBoolean()) {
+                        return elem.getAsBoolean();
+                    }
+                    String s = elem.getAsString();
+                    if ("true".equalsIgnoreCase(s)) return true;
+                    if ("false".equalsIgnoreCase(s)) return false;
+                }
+            }
+        }
+        return def;
+    }
+
     private String formatMaterialDisplayName(Material material) {
         if (material == null) return "Diamond";
         String name = material.name().replace('_', ' ').toLowerCase();
@@ -230,9 +267,14 @@ public class ConfigManager {
                 cleanupIntervalSeconds, cleanupIntervalSeconds));
         DebugLogger.log(String.format("CONFIG key=respawn-delay-ticks rawValue=%d parsedValue=%d consumer=AFKDummyPlugin.onEnable()",
                 respawnDelayTicks, respawnDelayTicks));
+        DebugLogger.log(String.format("CONFIG key=update-checker.enabled rawValue=%b parsedValue=%b consumer=UpdateChecker",
+                updateCheckerEnabled, updateCheckerEnabled));
+        DebugLogger.log(String.format("CONFIG key=update-checker.notify-players rawValue=%b parsedValue=%b consumer=UpdateChecker",
+                notifyUpdatesEnabled, notifyUpdatesEnabled));
 
         logger.info("Configuration active: cost=" + costPerHour + " " + paymentItemDisplayName
-                + "/hr, max-per-player=" + maxDummiesPerPlayer + ", max-server=" + maxServerWideDummies);
+                + "/hr, max-per-player=" + maxDummiesPerPlayer + ", max-server=" + maxServerWideDummies
+                + ", update-checker=" + updateCheckerEnabled);
     }
 
     /**
@@ -278,5 +320,15 @@ public class ConfigManager {
     /** @return delay in ticks before respawning dummies on server start */
     public int getRespawnDelayTicks() {
         return respawnDelayTicks;
+    }
+
+    /** @return true if automatic update checking is enabled */
+    public boolean isUpdateCheckerEnabled() {
+        return updateCheckerEnabled;
+    }
+
+    /** @return true if permitted players should receive update notifications */
+    public boolean isNotifyUpdatesEnabled() {
+        return notifyUpdatesEnabled;
     }
 }

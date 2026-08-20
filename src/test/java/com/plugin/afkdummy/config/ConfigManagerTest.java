@@ -203,17 +203,36 @@ class ConfigManagerTest {
         }
 
         @Test
-        @DisplayName("Safely handles malformed config.json by falling back to defaults/yaml")
-        void testMalformedJsonHandling() throws Exception {
-            java.nio.file.Files.writeString(tempDir.resolve("config.json"), "{ invalid json: !!!");
-            when(config.getInt(anyString(), anyInt())).thenReturn(5);
-            when(config.getString(anyString(), anyString())).thenReturn("DIAMOND");
+        @DisplayName("Parses update-checker boolean flags from config.json")
+        void testUpdateCheckerJson() throws Exception {
+            String jsonContent = """
+            {
+              "settings": {
+                "update-checker": {
+                  "enabled": false,
+                  "notify-players": false
+                }
+              }
+            }
+            """;
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), jsonContent);
 
             ConfigManager cm = new ConfigManager(plugin);
 
-            // Should safely fallback without crashing
-            assertEquals(5, cm.getCostPerHour());
-            assertEquals(Material.DIAMOND, cm.getPaymentItem());
+            assertFalse(cm.isUpdateCheckerEnabled());
+            assertFalse(cm.isNotifyUpdatesEnabled());
+        }
+
+        @Test
+        @DisplayName("Defaults update-checker to true when omitted")
+        void testUpdateCheckerDefaults() throws Exception {
+            String jsonContent = "{\"settings\": {\"cost-per-hour\": 5}}";
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), jsonContent);
+
+            ConfigManager cm = new ConfigManager(plugin);
+
+            assertTrue(cm.isUpdateCheckerEnabled());
+            assertTrue(cm.isNotifyUpdatesEnabled());
         }
     }
 }

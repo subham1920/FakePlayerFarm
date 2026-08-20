@@ -23,3 +23,8 @@ settings:
   # Delay in ticks before respawning dummies after server restart
   # 40 ticks = 2 seconds, ensures worlds are fully loaded
   respawn-delay-ticks: 40
+
+  # Automatic update checker configuration
+  update-checker:
+    enabled: true
+    notify-players: true

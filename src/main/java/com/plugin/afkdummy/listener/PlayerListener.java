@@ -301,6 +301,9 @@ public class PlayerListener implements Listener {
             Player player = event.getPlayer();
             if (player.isOnline()) {
                 dummyManager.handlePlayerJoin(player);
+                if (plugin.getUpdateChecker() != null) {
+                    plugin.getUpdateChecker().notifyPlayerIfUpdateAvailable(player);
+                }
             }
         }, 10L);
     }
