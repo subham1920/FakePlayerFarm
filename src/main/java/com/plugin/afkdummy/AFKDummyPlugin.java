@@ -208,7 +208,8 @@ public class AFKDummyPlugin extends JavaPlugin {
                 }
                 String newName = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
                 if (dummyManager.setDummyNameForOwner(player, newName)) {
-                    player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + newName);
+                    String formatted = com.plugin.afkdummy.entity.DummyPlayer.formatDisplayName(newName);
+                    player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + formatted);
                 } else {
                     player.sendMessage("§c§l✕ §cYou don't have any active AFK dummies to update.");
                 }

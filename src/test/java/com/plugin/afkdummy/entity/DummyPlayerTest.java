@@ -121,6 +121,30 @@ class DummyPlayerTest {
             assertEquals("JustRyt", invokeGenerateProfileName("JustRyt", session));
             assertEquals("Guard", invokeGenerateProfileName("Guard", session));
             assertEquals("Farmer", invokeGenerateProfileName("Farmer", session));
+            assertEquals("Afkin", invokeGenerateProfileName("Afkin", session));
+        }
+
+        @Test
+        @DisplayName("sanitizeRawName strips redundant prefixes and prevents duplication")
+        void testSanitizeRawName() {
+            assertEquals("Afkin", DummyPlayer.sanitizeRawName("Afkin"));
+            assertEquals("Steve", DummyPlayer.sanitizeRawName("[AFK] Steve"));
+            assertEquals("Steve", DummyPlayer.sanitizeRawName("[afk] Steve"));
+            assertEquals("Steve", DummyPlayer.sanitizeRawName("[AFK] [AFK] Steve"));
+            assertEquals("Steve", DummyPlayer.sanitizeRawName("AFK_Steve"));
+            assertEquals("Steve", DummyPlayer.sanitizeRawName("AFK Steve"));
+            assertEquals("Dummy", DummyPlayer.sanitizeRawName(""));
+            assertEquals("Dummy", DummyPlayer.sanitizeRawName(null));
+        }
+
+        @Test
+        @DisplayName("formatDisplayName produces clean [AFK] <name> format")
+        void testFormatDisplayName() {
+            assertEquals("[AFK] Afkin", DummyPlayer.formatDisplayName("Afkin"));
+            assertEquals("[AFK] Steve", DummyPlayer.formatDisplayName("Steve"));
+            assertEquals("[AFK] Steve", DummyPlayer.formatDisplayName("[AFK] Steve"));
+            assertEquals("[AFK] TestDummy", DummyPlayer.formatDisplayName("TestDummy"));
+            assertEquals("[AFK] JustRyt", DummyPlayer.formatDisplayName("JustRyt"));
         }
     }
 }

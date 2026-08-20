@@ -4,6 +4,7 @@ import com.plugin.afkdummy.AFKDummyPlugin;
 import com.plugin.afkdummy.config.ConfigManager;
 import com.plugin.afkdummy.entity.DummyManager;
 import com.plugin.afkdummy.entity.DummySession;
+import com.plugin.afkdummy.util.DebugLogger;
 import com.plugin.afkdummy.util.ItemCostUtil;
 import com.plugin.afkdummy.util.TimeUtil;
 import org.bukkit.Material;
@@ -121,6 +122,8 @@ public class TimeSelectionMenu extends MenuFramework {
         int currentCount = dummyManager.getActiveCountByOwner(player.getUniqueId());
         int maxAllowed = config.getMaxDummiesPerPlayer();
         if (currentCount >= maxAllowed) {
+            DebugLogger.log(String.format("COMMAND /afkdummy create actor=%s config max-dummies=%d owned_dummies=%d decision=DENY reason=MAX_DUMMIES_REACHED",
+                    player.getName(), maxAllowed, currentCount));
             player.sendMessage("§c§l✕ §cYou have reached your maximum dummy limit ("
                     + currentCount + "/" + maxAllowed + ")!");
             return;
@@ -128,13 +131,18 @@ public class TimeSelectionMenu extends MenuFramework {
 
         // Re-verify: server limit
         if (dummyManager.getActiveCount() >= config.getMaxServerWideDummies()) {
+            DebugLogger.log(String.format("COMMAND /afkdummy create actor=%s config max-server-dummies=%d total_dummies=%d decision=DENY reason=SERVER_LIMIT_REACHED",
+                    player.getName(), config.getMaxServerWideDummies(), dummyManager.getActiveCount()));
             player.sendMessage("§c§l✕ §cServer dummy limit reached. Try again later.");
             return;
         }
 
         // Atomic inventory check and deduction
         Material paymentItem = config.getPaymentItem();
+        int playerHasBefore = ItemCostUtil.countItems(player, paymentItem);
         if (!ItemCostUtil.removeItems(player, paymentItem, cost)) {
+            DebugLogger.log(String.format("PURCHASE actor=%s config currency=%s required=%d player_has=%d decision=DENY reason=INSUFFICIENT_FUNDS",
+                    player.getName(), paymentItem.name(), cost, playerHasBefore));
             String message = "§c§l✕ §cInsufficient funds. Please place §f"
                     + cost + " " + config.getPaymentItemDisplayName()
                     + " §cin your inventory.";
@@ -144,6 +152,9 @@ public class TimeSelectionMenu extends MenuFramework {
                     .color(net.kyori.adventure.text.format.NamedTextColor.RED));
             return;
         }
+
+        DebugLogger.log(String.format("PURCHASE actor=%s config currency=%s required=%d player_had=%d decision=ALLOW duration_hours=%d",
+                player.getName(), paymentItem.name(), cost, playerHasBefore, hours));
 
         // Payment successful — spawn the dummy
         long durationMs = TimeUtil.hoursToMillis(hours);
@@ -163,6 +174,8 @@ public class TimeSelectionMenu extends MenuFramework {
             player.getInventory().addItem(new ItemStack(paymentItem, cost));
             player.updateInventory();
             player.sendMessage("§c§l✕ §cFailed to spawn dummy. Your items have been refunded.");
+            DebugLogger.log(String.format("PURCHASE_REFUND actor=%s currency=%s amount=%d reason=SPAWN_FAILED",
+                    player.getName(), paymentItem.name(), cost));
         }
     }
 

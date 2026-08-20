@@ -225,18 +225,18 @@ public class DummyPlayer {
      */
     public void setCustomDisplayName(String newName) {
         String oldName = this.customName;
-        this.customName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : null;
+        this.customName = (newName != null && !newName.trim().isEmpty()) ? sanitizeRawName(newName) : null;
 
         if (handle != null && handle.getBukkitEntity() != null) {
-            String displayName = this.customName != null ? this.customName : ownerName;
+            String formatted = getFormattedDisplayName();
 
             // 1. Update Adventure Player List Name (Tab List) & Bukkit Custom Name
-            handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
-            handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
+            handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(formatted));
+            handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(formatted));
             handle.getBukkitEntity().setCustomNameVisible(true);
 
             // 2. Update GameProfile Name on NMS ServerPlayer so 3D nametag renders correctly (clean name, zero trailing chars!)
-            String newProfileName = generateProfileName(displayName);
+            String newProfileName = generateProfileName(getRawName());
             updateGameProfileName(newProfileName);
 
             // 3. Update Scoreboard Team for in-world styling
@@ -246,8 +246,8 @@ public class DummyPlayer {
             resendPlayerInfoToAll();
 
             DebugLogger.trace("DummyPlayer.java:setCustomDisplayName",
-                    String.format("Updated dummy name for %s: old=\"%s\" -> new=\"%s\" (profile=\"%s\")",
-                            ownerName, oldName, this.customName, newProfileName));
+                    String.format("Updated dummy name for %s: old=\"%s\" -> new=\"%s\" (profile=\"%s\", formatted=\"%s\")",
+                            ownerName, oldName, this.customName, newProfileName, formatted));
         }
     }
 
@@ -350,12 +350,12 @@ public class DummyPlayer {
             handle.getBukkitEntity().setSleepingIgnored(true);
 
             // Set clean tab list display name & nametag using Adventure API
-            String displayName = (customName != null && !customName.trim().isEmpty()) ? customName.trim() : "[AFK] " + ownerName;
+            String displayName = getFormattedDisplayName();
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
 
-            // Register Scoreboard Team for in-world nametag display
+            // Register Scoreboard Team for in-world nametag display ([AFK] prefix)
             updateScoreboardTeam();
 
             // Update ChunkMap tracking to target location
@@ -490,15 +490,11 @@ public class DummyPlayer {
                 team.addEntry(currentScoreboardName);
             }
 
-            if (customName != null && !customName.trim().isEmpty()) {
-                team.prefix(net.kyori.adventure.text.Component.empty());
-                team.suffix(net.kyori.adventure.text.Component.empty());
-                team.color(net.kyori.adventure.text.format.NamedTextColor.YELLOW);
-            } else {
-                team.prefix(net.kyori.adventure.text.Component.text("[AFK] ").color(net.kyori.adventure.text.format.NamedTextColor.GRAY));
-                team.suffix(net.kyori.adventure.text.Component.empty());
-                team.color(net.kyori.adventure.text.format.NamedTextColor.WHITE);
-            }
+            // In-world 3D nametag above head renders: Team.prefix + GameProfile.name
+            // We set prefix to "[AFK] " and color to GRAY/WHITE for clear, professional styling
+            team.prefix(net.kyori.adventure.text.Component.text("[AFK] ").color(net.kyori.adventure.text.format.NamedTextColor.GRAY));
+            team.suffix(net.kyori.adventure.text.Component.empty());
+            team.color(net.kyori.adventure.text.format.NamedTextColor.WHITE);
         } catch (Throwable e) {
             DebugLogger.log("Warning: Failed to update scoreboard team for dummy: " + e.getMessage());
         }
@@ -761,13 +757,59 @@ public class DummyPlayer {
     }
 
     /**
+     * Cleans and sanitizes a raw dummy name by stripping any existing AFK prefix.
+     */
+    public static String sanitizeRawName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return "Dummy";
+        }
+        String trimmed = name.trim();
+        while (trimmed.toUpperCase().startsWith("[AFK]") || trimmed.toUpperCase().startsWith("AFK_") || trimmed.toUpperCase().startsWith("AFK ")) {
+            if (trimmed.toUpperCase().startsWith("[AFK]")) {
+                trimmed = trimmed.substring(5).trim();
+            } else if (trimmed.toUpperCase().startsWith("AFK_")) {
+                trimmed = trimmed.substring(4).trim();
+            } else if (trimmed.toUpperCase().startsWith("AFK ")) {
+                trimmed = trimmed.substring(4).trim();
+            }
+        }
+        if (trimmed.isEmpty()) {
+            trimmed = "Dummy";
+        }
+        return trimmed;
+    }
+
+    /**
+     * Formats the authoritative display name for TAB and nametag display: "[AFK] <cleanName>".
+     */
+    public static String formatDisplayName(String rawName) {
+        String clean = sanitizeRawName(rawName);
+        return "[AFK] " + clean;
+    }
+
+    /**
+     * Gets this dummy's clean raw name (e.g. "Afkin" or "Steve" or ownerName).
+     */
+    public String getRawName() {
+        return customName != null ? customName : ownerName;
+    }
+
+    /**
+     * Gets this dummy's formatted display name (e.g. "[AFK] Afkin" or "[AFK] JustRyt").
+     */
+    public String getFormattedDisplayName() {
+        return formatDisplayName(getRawName());
+    }
+
+    /**
      * Generates a valid alphanumeric GameProfile username (<= 16 chars) with zero trailing suffixes or extra characters.
      */
     public static String generateProfileName(String name) {
         if (name == null || name.trim().isEmpty()) {
             return "Dummy";
         }
-        String sanitized = name.replaceAll("[^a-zA-Z0-9_]", "");
+        String clean = sanitizeRawName(name);
+        String sanitized = clean.replaceAll("[^a-zA-Z0-9_]", "");
         if (sanitized.isEmpty()) {
             sanitized = "Dummy";
         }
