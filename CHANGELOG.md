@@ -4,6 +4,8 @@ All notable changes to the AFKDummy (FakePlayerFarm) plugin are documented in th
 
 ## [1.0.3] - 2026-08-20
 
+> **Note**: Version 1.0.2 contained several initial runtime bugs and was skipped for general distribution / Modrinth release. Its development archive remains available on GitHub. Version 1.0.3 is the definitive production-ready release.
+
 ### 🐛 Bug Fixes & Architecture Improvements
 - **3D Floating In-World Nametag `[AFK] <name>` Fix**:
   - Broadcasts explicit `ClientboundSetPlayerTeamPacket` protocol packets across all active player connections, guaranteeing that the floating nametag above the dummy's head displays `[AFK] <name>` consistently across all scoreboards and client setups.
