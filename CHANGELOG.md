@@ -2,6 +2,25 @@
 
 All notable changes to the AFKDummy (FakePlayerFarm) plugin are documented in this file.
 
+## [1.0.3] - 2026-08-20
+
+### 🐛 Bug Fixes & Architecture Improvements
+- **3D Floating In-World Nametag `[AFK] <name>` Fix**:
+  - Broadcasts explicit `ClientboundSetPlayerTeamPacket` protocol packets across all active player connections, guaranteeing that the floating nametag above the dummy's head displays `[AFK] <name>` consistently across all scoreboards and client setups.
+  - Implemented single source of truth for dummy display names with prefix deduplication (`[AFK] Steve` $\rightarrow$ `[AFK] Steve`).
+  - Removed all unwanted trailing session ID characters and suffix artifacts.
+- **Initial Spawn Placement Race Condition Fix**:
+  - Pre-registers dummy sessions in active tracking maps prior to `PlayerList.placeNewPlayer()`.
+  - Paper's `PlayerSpawnLocationEvent` intercepts the injection and places the fake player directly in the target chunk and coordinates on tick 0, preventing world spawn appearance.
+- **Teleportation & Rotation Sync**:
+  - Replaced unacknowledged packet teleports with authoritative NMS position and connection resets (`connection.resetPosition()`), fixing visual rubberbanding and snap-backs.
+  - Synchronized head yaw (`yHeadRot`) and body yaw (`yBodyRot`) with Bukkit rotation queries and tracking packets.
+- **Dual `config.json` & `config.yml` Support**:
+  - Native loading and live hot-reloading (`/afkdummy reload`) for both `config.json` and `config.yml`.
+  - Full configuration audit logging in `latest-debug.txt` tracking item currency, limits, and costs.
+- **Duplicate Entity Detection & Diagnostics**:
+  - Added `/afkdummy debug` command and automated entity duplicate checks across server worlds and player lists.
+
 ## [1.0.2] - 2026-08-19
 
 ### ✨ Added

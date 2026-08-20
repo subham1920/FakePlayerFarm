@@ -97,9 +97,7 @@ public class MainMenu extends MenuFramework {
 
             // Slot 11 — Change Name
             DummySession primarySession = sessions.get(0);
-            String currentCustomName = primarySession.getCustomName() != null && !primarySession.getCustomName().isEmpty()
-                    ? primarySession.getCustomName()
-                    : "[AFK] " + viewer.getName();
+            String currentCustomName = primarySession.getFormattedDisplayName();
 
             setItem(11, createItem(Material.NAME_TAG,
                     "§e§lChange Name",
@@ -125,7 +123,8 @@ public class MainMenu extends MenuFramework {
                                 newName = newName.substring(0, 32);
                             }
                             if (dummyManager.setDummyNameForOwner(player, newName)) {
-                                player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + newName);
+                                String formattedName = com.plugin.afkdummy.entity.DummyPlayer.formatDisplayName(newName);
+                                player.sendMessage("§a§l✓ §aUpdated dummy display name to: §f" + formattedName);
                                 try {
                                     player.playSound(player.getLocation(), org.bukkit.Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
                                 } catch (Throwable ignored) {}

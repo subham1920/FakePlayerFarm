@@ -3,8 +3,8 @@
 ![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21%2B-brightgreen.svg)
 ![Platform](https://img.shields.io/badge/Platform-PaperMC%2026.2-blue.svg)
 ![Java](https://img.shields.io/badge/Java-25-orange.svg)
-![Build](https://img.shields.io/badge/Tests-1645%20Passing-success.svg)
-![Version](https://img.shields.io/badge/Version-v1.0.2-purple.svg)
+![Build](https://img.shields.io/badge/Tests-1664%20Passing-success.svg)
+![Version](https://img.shields.io/badge/Version-v1.0.3-purple.svg)
 
 A high-performance PaperMC plugin that spawns **true NMS `ServerPlayer` fake player entities**. Unlike conventional chunk-loaders (`Chunk#setForceLoaded`), AFK dummies fully participate in the server's simulation loop, triggering **crop growth (random block ticks)**, **farm mechanics**, and **natural mob spawning**.
 

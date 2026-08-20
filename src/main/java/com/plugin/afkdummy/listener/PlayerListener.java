@@ -4,6 +4,7 @@ import com.plugin.afkdummy.AFKDummyPlugin;
 import com.plugin.afkdummy.entity.DummyManager;
 import com.plugin.afkdummy.entity.DummySession;
 import com.plugin.afkdummy.gui.MainMenu;
+import com.plugin.afkdummy.util.DebugLogger;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -268,8 +269,28 @@ public class PlayerListener implements Listener {
     }
 
     // ========================================================================
-    // Player Join / World Unload
+    // Player Join / Spawn / World Unload
     // ========================================================================
+
+    /**
+     * Guarantees the initial spawn location of a dummy during placeNewPlayer()
+     * directly matches its designated spawn location, preventing fallback to world spawn.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPlayerSpawnLocation(org.spigotmc.event.player.PlayerSpawnLocationEvent event) {
+        Player player = event.getPlayer();
+        if (dummyManager.isDummyPlayer(player)) {
+            Optional<DummySession> session = dummyManager.getSessionByPlayer(player);
+            if (session.isPresent()) {
+                Location loc = session.get().getLocation();
+                if (loc != null && loc.getWorld() != null) {
+                    event.setSpawnLocation(loc);
+                    DebugLogger.trace("PlayerListener.java:onPlayerSpawnLocation",
+                            "Overrode PlayerSpawnLocationEvent for dummy " + player.getName() + " to " + loc);
+                }
+            }
+        }
+    }
 
     /**
      * Sends dummy spawn packets to newly joined players.

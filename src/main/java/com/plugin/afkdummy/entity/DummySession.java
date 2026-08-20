@@ -159,6 +159,11 @@ public class DummySession {
         return dummyPlayer.getCustomName();
     }
 
+    /** @return authoritative formatted display name (e.g. "[AFK] Afkin" or "[AFK] JustRyt") */
+    public String getFormattedDisplayName() {
+        return dummyPlayer != null ? dummyPlayer.getFormattedDisplayName() : "[AFK] " + ownerName;
+    }
+
     /** @return custom skin username if set */
     public String getSkinName() {
         return dummyPlayer.getSkinName();

@@ -79,6 +79,8 @@ replay_pid*
 # ==============================================
 *.log
 debug.log
+latest-debug.txt
+latest-debug*.txt
 dummies.json
 dummies.json.tmp
 plugins/

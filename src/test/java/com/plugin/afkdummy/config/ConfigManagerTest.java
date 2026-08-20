@@ -23,6 +23,9 @@ import static org.mockito.Mockito.*;
 @DisplayName("ConfigManager Tests")
 class ConfigManagerTest {
 
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path tempDir;
+
     private JavaPlugin plugin;
     private FileConfiguration config;
 
@@ -32,6 +35,7 @@ class ConfigManagerTest {
         config = mock(FileConfiguration.class);
         when(plugin.getConfig()).thenReturn(config);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("ConfigManagerTest"));
+        when(plugin.getDataFolder()).thenReturn(tempDir.toFile());
     }
 
     @Nested
@@ -142,6 +146,74 @@ class ConfigManagerTest {
 
             ConfigManager cm = new ConfigManager(plugin);
             assertEquals(expectedDisplay, cm.getPaymentItemDisplayName());
+        }
+    }
+
+    @Nested
+    @DisplayName("Direct config.json File Parsing & Mutation Tests")
+    class JsonConfigTests {
+
+        @Test
+        @DisplayName("Loads custom values directly from config.json")
+        void testLoadFromJson() throws Exception {
+            String jsonContent = """
+            {
+              "settings": {
+                "cost-per-hour": 10,
+                "payment-item": "GOLD_INGOT",
+                "payment-item-display-name": "Gold Ingot",
+                "max-dummies-per-player": 3,
+                "max-server-wide-dummies": 50,
+                "cleanup-interval-seconds": 60,
+                "respawn-delay-ticks": 100
+              }
+            }
+            """;
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), jsonContent);
+
+            ConfigManager cm = new ConfigManager(plugin);
+
+            assertEquals(10, cm.getCostPerHour());
+            assertEquals(Material.GOLD_INGOT, cm.getPaymentItem());
+            assertEquals("Gold Ingot", cm.getPaymentItemDisplayName());
+            assertEquals(3, cm.getMaxDummiesPerPlayer());
+            assertEquals(50, cm.getMaxServerWideDummies());
+            assertEquals(60, cm.getCleanupIntervalSeconds());
+            assertEquals(100, cm.getRespawnDelayTicks());
+            assertEquals(30, cm.calculateCost(3));
+        }
+
+        @Test
+        @DisplayName("Reloads new mutated values when config.json changes on disk")
+        void testMutateAndReloadJson() throws Exception {
+            // Initial state
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), "{\"settings\": {\"max-dummies-per-player\": 1, \"payment-item\": \"IRON_INGOT\"}}");
+            ConfigManager cm = new ConfigManager(plugin);
+            assertEquals(1, cm.getMaxDummiesPerPlayer());
+            assertEquals(Material.IRON_INGOT, cm.getPaymentItem());
+
+            // Mutate file on disk to unusual values
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), "{\"settings\": {\"max-dummies-per-player\": 7, \"payment-item\": \"EMERALD\", \"cost-per-hour\": 12}}");
+            cm.reload();
+
+            assertEquals(7, cm.getMaxDummiesPerPlayer());
+            assertEquals(Material.EMERALD, cm.getPaymentItem());
+            assertEquals(12, cm.getCostPerHour());
+            assertEquals("Emerald", cm.getPaymentItemDisplayName());
+        }
+
+        @Test
+        @DisplayName("Safely handles malformed config.json by falling back to defaults/yaml")
+        void testMalformedJsonHandling() throws Exception {
+            java.nio.file.Files.writeString(tempDir.resolve("config.json"), "{ invalid json: !!!");
+            when(config.getInt(anyString(), anyInt())).thenReturn(5);
+            when(config.getString(anyString(), anyString())).thenReturn("DIAMOND");
+
+            ConfigManager cm = new ConfigManager(plugin);
+
+            // Should safely fallback without crashing
+            assertEquals(5, cm.getCostPerHour());
+            assertEquals(Material.DIAMOND, cm.getPaymentItem());
         }
     }
 }
