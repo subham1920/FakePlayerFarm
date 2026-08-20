@@ -258,15 +258,28 @@ public class DummyManager {
         }
 
         try {
-            session.getDummyPlayer().teleport(newLocation);
+            DummyPlayer dp = session.getDummyPlayer();
+            dp.teleport(newLocation);
             storage.updateLocation(sessionId, newLocation);
+
+            // Schedule multi-tick verification timeline (T0, T+1, T+2, T+5, T+10, T+20, T+40)
+            DebugLogger.scheduleTeleportVerification(
+                    plugin,
+                    sessionId,
+                    session.getOwnerName(),
+                    newLocation,
+                    () -> dp.getHandle() != null ? new Location(
+                            dp.getLocation().getWorld(),
+                            dp.getHandle().getX(), dp.getHandle().getY(), dp.getHandle().getZ(),
+                            dp.getHandle().getYRot(), dp.getHandle().getXRot()
+                    ) : null,
+                    () -> dp.getBukkitPlayer() != null ? dp.getBukkitPlayer().getLocation() : null,
+                    () -> storage.getBySession(sessionId).map(com.plugin.afkdummy.storage.DummyData::toLocation).orElse(null)
+            );
 
             plugin.getLogger().info(String.format("Teleported AFK dummy for %s (session %s) to %s, %s",
                     session.getOwnerName(), sessionId, newLocation.getWorld().getName(),
                     String.format("%.1f, %.1f, %.1f", newLocation.getX(), newLocation.getY(), newLocation.getZ())));
-            DebugLogger.log(String.format("Teleported dummy session %s for %s to world %s (%.1f, %.1f, %.1f)",
-                    sessionId, session.getOwnerName(), newLocation.getWorld().getName(),
-                    newLocation.getX(), newLocation.getY(), newLocation.getZ()));
             return true;
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Failed to teleport dummy for session " + sessionId, e);

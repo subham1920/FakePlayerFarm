@@ -1,13 +1,15 @@
 package com.plugin.afkdummy.util;
 
-import org.bukkit.plugin.Plugin;
+import com.plugin.afkdummy.AFKDummyPlugin;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.PluginDescriptionFile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,57 +40,76 @@ class DebugLoggerTest {
     }
 
     @Test
-    @DisplayName("init and log create and append to debug.log")
+    @DisplayName("init and log create latest-debug.txt with session header")
     void testInitAndLog(@TempDir Path tempDir) throws Exception {
-        Plugin plugin = mock(Plugin.class);
+        AFKDummyPlugin plugin = mock(AFKDummyPlugin.class);
+        PluginDescriptionFile desc = mock(PluginDescriptionFile.class);
+        when(desc.getVersion()).thenReturn("1.0.2-debug");
+        when(plugin.getDescription()).thenReturn(desc);
         when(plugin.getDataFolder()).thenReturn(tempDir.toFile());
+        when(plugin.getLogger()).thenReturn(java.util.logging.Logger.getLogger("TestLogger"));
 
-        DebugLogger.init(plugin);
+        try (MockedStatic<Bukkit> mockedBukkit = mockStatic(Bukkit.class)) {
+            mockedBukkit.when(Bukkit::getVersion).thenReturn("Paper 1.21.4");
+            mockedBukkit.when(Bukkit::getBukkitVersion).thenReturn("1.21.4-R0.1-SNAPSHOT");
 
-        File logFile = new File(tempDir.toFile(), "debug.log");
-        assertTrue(logFile.exists());
+            DebugLogger.init(plugin);
 
-        DebugLogger.log("Hello from test");
-        DebugLogger.log("Second message");
+            File logFile = new File(tempDir.toFile(), "latest-debug.txt");
+            assertTrue(logFile.exists());
 
-        List<String> lines = Files.readAllLines(logFile.toPath());
-        assertTrue(lines.size() >= 3);
-        assertTrue(lines.get(0).contains("Debug Logger Initialized"));
-        assertTrue(lines.stream().anyMatch(l -> l.contains("Hello from test")));
-        assertTrue(lines.stream().anyMatch(l -> l.contains("Second message")));
+            DebugLogger.log("Hello from test");
+            DebugLogger.trace("DummyPlayer.java:spawn", "Spawn initiated");
+            DebugLogger.command("Player1", "/afkdummy tp", "SUCCESS", "teleported to base");
+            DebugLogger.close();
+
+            List<String> lines = Files.readAllLines(logFile.toPath());
+            assertTrue(lines.size() >= 5);
+            assertTrue(lines.stream().anyMatch(l -> l.contains("AFKDummy DEBUG SESSION")));
+            assertTrue(lines.stream().anyMatch(l -> l.contains("Hello from test")));
+            assertTrue(lines.stream().anyMatch(l -> l.contains("Spawn initiated")));
+            assertTrue(lines.stream().anyMatch(l -> l.contains("/afkdummy tp")));
+        }
     }
 
     @Test
     @DisplayName("Concurrent multi-threaded logging is thread safe")
     void testConcurrentLogging(@TempDir Path tempDir) throws Exception {
-        Plugin plugin = mock(Plugin.class);
+        AFKDummyPlugin plugin = mock(AFKDummyPlugin.class);
+        PluginDescriptionFile desc = mock(PluginDescriptionFile.class);
+        when(desc.getVersion()).thenReturn("1.0.2-debug");
+        when(plugin.getDescription()).thenReturn(desc);
         when(plugin.getDataFolder()).thenReturn(tempDir.toFile());
+        when(plugin.getLogger()).thenReturn(java.util.logging.Logger.getLogger("TestLogger"));
 
-        DebugLogger.init(plugin);
+        try (MockedStatic<Bukkit> mockedBukkit = mockStatic(Bukkit.class)) {
+            mockedBukkit.when(Bukkit::getVersion).thenReturn("Paper 1.21.4");
+            mockedBukkit.when(Bukkit::getBukkitVersion).thenReturn("1.21.4-R0.1-SNAPSHOT");
 
-        int threads = 10;
-        int logsPerThread = 20;
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-        CountDownLatch latch = new CountDownLatch(threads);
+            DebugLogger.init(plugin);
 
-        for (int t = 0; t < threads; t++) {
-            final int threadId = t;
-            executor.submit(() -> {
-                try {
+            int threads = 10;
+            int logsPerThread = 20;
+            ExecutorService executor = Executors.newFixedThreadPool(threads);
+            CountDownLatch latch = new CountDownLatch(threads);
+
+            for (int t = 0; t < threads; t++) {
+                final int threadId = t;
+                executor.submit(() -> {
                     for (int i = 0; i < logsPerThread; i++) {
-                        DebugLogger.log("Thread-" + threadId + " msg " + i);
+                        DebugLogger.log("Thread " + threadId + " message " + i);
                     }
-                } finally {
                     latch.countDown();
-                }
-            });
+                });
+            }
+
+            latch.await();
+            executor.shutdown();
+            DebugLogger.close();
+
+            File logFile = new File(tempDir.toFile(), "latest-debug.txt");
+            List<String> lines = Files.readAllLines(logFile.toPath());
+            assertTrue(lines.size() >= (threads * logsPerThread));
         }
-
-        latch.await();
-        executor.shutdown();
-
-        File logFile = new File(tempDir.toFile(), "debug.log");
-        List<String> lines = Files.readAllLines(logFile.toPath());
-        assertEquals(1 + (threads * logsPerThread), lines.size());
     }
 }

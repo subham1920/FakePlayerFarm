@@ -222,14 +222,61 @@ public class DummyPlayer {
      * Changes the dummy's visual display name dynamically.
      */
     public void setCustomDisplayName(String newName) {
+        String oldName = this.customName;
         this.customName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : null;
+
         if (handle != null && handle.getBukkitEntity() != null) {
             String displayName = this.customName != null ? this.customName : "[AFK] " + ownerName;
+
+            // 1. Update Adventure Player List Name (Tab List) & Bukkit Custom Name
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
+
+            // 2. Update GameProfile Name on NMS ServerPlayer so 3D nametag renders correctly
+            String newProfileName = generateProfileName(this.customName != null ? this.customName : ownerName, sessionId);
+            updateGameProfileName(newProfileName);
+
+            // 3. Update Scoreboard Team for in-world styling
             updateScoreboardTeam();
+
+            // 4. Send client refresh packets
             resendPlayerInfoToAll();
+
+            DebugLogger.trace("DummyPlayer.java:setCustomDisplayName",
+                    String.format("Updated dummy name for %s: old=\"%s\" -> new=\"%s\" (profile=\"%s\")",
+                            ownerName, oldName, this.customName, newProfileName));
+        }
+    }
+
+    /**
+     * Reflectively updates the GameProfile name on the NMS ServerPlayer entity.
+     */
+    private void updateGameProfileName(String newProfileName) {
+        try {
+            GameProfile current = handle.getGameProfile();
+            GameProfile updated = new GameProfile(current.id(), newProfileName);
+            for (var entry : current.properties().entries()) {
+                updated.properties().put(entry.getKey(), entry.getValue());
+            }
+
+            java.lang.reflect.Field gameProfileField = null;
+            Class<?> clazz = net.minecraft.world.entity.player.Player.class;
+            while (clazz != null && clazz != Object.class) {
+                try {
+                    gameProfileField = clazz.getDeclaredField("gameProfile");
+                    break;
+                } catch (NoSuchFieldException e) {
+                    clazz = clazz.getSuperclass();
+                }
+            }
+
+            if (gameProfileField != null) {
+                gameProfileField.setAccessible(true);
+                gameProfileField.set(handle, updated);
+            }
+        } catch (Throwable t) {
+            DebugLogger.log("Warning: Failed to update GameProfile name: " + t.getMessage());
         }
     }
 
@@ -267,19 +314,24 @@ public class DummyPlayer {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
             ServerLevel level = ((CraftWorld) spawnLocation.getWorld()).getHandle();
 
+            DebugLogger.lifecycle(sessionId.toString(), "SPAWN_START",
+                    String.format("Spawning dummy for %s at %s", ownerName, formatLocation()));
+
             // Pre-write playerdata with exact location so placeNewPlayer spawns directly in target chunk
             writeInitialPlayerData(handle.getUUID(), spawnLocation);
+
+            // Pre-set NMS position
+            handle.setPos(spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ());
+            handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
+            handle.setOldPosAndRot();
 
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
 
-            // Authoritative Bukkit teleport to synchronize ChunkMap tracking and player coordinates
-            handle.getBukkitEntity().teleport(spawnLocation, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
-
-            // Re-enforce position post-spawn
-            handle.setPos(spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ());
-            handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
-            handle.setOldPosAndRot();
+            // Reset connection teleport state to prevent pending unconfirmed teleport
+            if (handle.connection != null) {
+                handle.connection.resetPosition();
+            }
 
             // Post-spawn configuration
             handle.setGameMode(GameType.SURVIVAL);
@@ -304,23 +356,23 @@ public class DummyPlayer {
             // Register Scoreboard Team for in-world nametag display
             updateScoreboardTeam();
 
+            // Update ChunkMap tracking to target location
+            try {
+                level.getChunkSource().chunkMap.move(handle);
+            } catch (Throwable ignored) {}
+
             spawned = true;
             resendPlayerInfoToAll();
 
             plugin.getLogger().info("Spawned AFK dummy for " + ownerName
                     + " at " + formatLocation());
-            DebugLogger.log(String.format(
-                    "Successfully spawned dummy player via placeNewPlayer for %s at %s. ID: %d, UUID: %s, Session: %s",
-                    ownerName, formatLocation(), handle.getId(), handle.getUUID(), sessionId));
+            DebugLogger.lifecycle(sessionId.toString(), "SPAWN_SUCCESS",
+                    String.format("Successfully spawned dummy for %s at %s. EntityID: %d, UUID: %s",
+                            ownerName, formatLocation(), handle.getId(), handle.getUUID()));
 
         } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE,
-                    "Failed to spawn dummy for " + ownerName, e);
-            DebugLogger.log(String.format("ERROR: Failed to spawn dummy for %s. Reason: %s",
-                    ownerName, e.toString()));
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            DebugLogger.log(sw.toString());
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn dummy for " + ownerName, e);
+            DebugLogger.lifecycle(sessionId.toString(), "SPAWN_FAIL", "Reason: " + e.getMessage());
             throw new IllegalStateException("Dummy spawn failed", e);
         }
     }
@@ -364,13 +416,18 @@ public class DummyPlayer {
             root.putBoolean("OnGround", true);
             root.putBoolean("Invulnerable", true);
             root.putInt("playerGameType", 0);
+            root.putInt("DataVersion", net.minecraft.SharedConstants.getCurrentVersion().dataVersion().version());
 
             net.minecraft.nbt.CompoundTag bukkitTag = new net.minecraft.nbt.CompoundTag();
+            UUID worldUUID = loc.getWorld().getUID();
+            bukkitTag.putLong("worldLow", worldUUID.getLeastSignificantBits());
+            bukkitTag.putLong("worldHigh", worldUUID.getMostSignificantBits());
             bukkitTag.putString("world", loc.getWorld().getName());
             root.put("bukkit", bukkitTag);
 
             net.minecraft.nbt.NbtIo.writeCompressed(root, playerFile.toPath());
-            DebugLogger.log("Wrote pre-spawn playerdata for " + uuid + " at " + loc);
+            DebugLogger.storage("WRITE", playerFile.getAbsolutePath(),
+                    String.format("Wrote pre-spawn playerdata for %s at %s", uuid, loc));
         } catch (Throwable e) {
             DebugLogger.log("Warning: Failed to write pre-spawn playerdata for " + uuid + ": " + e.getMessage());
         }
@@ -387,12 +444,9 @@ public class DummyPlayer {
             java.io.File playerFile = new java.io.File(worldFolder, uuid + ".dat");
             if (playerFile.exists()) {
                 if (playerFile.delete()) {
-                    DebugLogger.log("Deleted stale playerdata for dummy UUID: " + uuid);
-                } else {
-                    plugin.getLogger().warning("Could not delete stale playerdata for dummy UUID: " + uuid);
+                    DebugLogger.storage("DELETE", playerFile.getAbsolutePath(), "Deleted temporary playerdata for " + uuid);
                 }
             }
-            // Also try .dat_old backup
             java.io.File playerFileOld = new java.io.File(worldFolder, uuid + ".dat_old");
             if (playerFileOld.exists()) {
                 playerFileOld.delete();
@@ -420,9 +474,18 @@ public class DummyPlayer {
             if (team == null) {
                 team = scoreboard.registerNewTeam(teamName);
             }
-            String profileName = handle.getScoreboardName();
-            if (!team.hasEntry(profileName)) {
-                team.addEntry(profileName);
+
+            String currentScoreboardName = handle.getScoreboardName();
+
+            // Clean up any stale entries in this team
+            for (String entry : new java.util.HashSet<>(team.getEntries())) {
+                if (!entry.equals(currentScoreboardName)) {
+                    team.removeEntry(entry);
+                }
+            }
+
+            if (!team.hasEntry(currentScoreboardName)) {
+                team.addEntry(currentScoreboardName);
             }
 
             if (customName != null && !customName.trim().isEmpty()) {
@@ -457,7 +520,7 @@ public class DummyPlayer {
 
     /**
      * Teleports the dummy to a new location authoritatively.
-     * Updates internal spawnLocation, calls CraftPlayer teleport, and synchronizes coordinates.
+     * Updates internal spawnLocation, calls NMS moveTo, resets connection state, and moves ChunkMap tracking.
      *
      * @param newLocation the destination Location
      */
@@ -471,17 +534,60 @@ public class DummyPlayer {
 
         this.spawnLocation = newLocation.clone();
 
-        // Authoritative Bukkit teleportation updates ChunkMap tracking and player position
-        handle.getBukkitEntity().teleport(newLocation, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+        ServerLevel targetLevel = ((CraftWorld) newLocation.getWorld()).getHandle();
+        ServerLevel currentLevel = (ServerLevel) handle.level();
 
-        // Synchronize NMS coordinates
-        handle.setPos(newLocation.getX(), newLocation.getY(), newLocation.getZ());
-        handle.setRot(newLocation.getYaw(), newLocation.getPitch());
-        handle.setOldPosAndRot();
+        DebugLogger.trace("DummyPlayer.java:teleport",
+                String.format("Teleporting dummy %s from %s to %s",
+                        ownerName, formatLocation(), formatLoc(newLocation)));
 
+        if (!targetLevel.equals(currentLevel)) {
+            // Cross-world teleport
+            handle.teleportTo(targetLevel, newLocation.getX(), newLocation.getY(), newLocation.getZ(),
+                    java.util.Set.of(), newLocation.getYaw(), newLocation.getPitch(), true);
+        } else {
+            // Same world authoritative moveTo
+            handle.setPos(newLocation.getX(), newLocation.getY(), newLocation.getZ());
+            handle.setRot(newLocation.getYaw(), newLocation.getPitch());
+            handle.setOldPosAndRot();
+        }
+
+        // Reset connection awaitingTeleport to prevent unacknowledged packet snap-backs
+        if (handle.connection != null) {
+            handle.connection.resetPosition();
+        }
+
+        // Update ChunkMap tracking to the new chunk
+        try {
+            targetLevel.getChunkSource().chunkMap.move(handle);
+        } catch (Throwable ignored) {}
+
+        // Broadcast authoritative TeleportEntity packet to all tracking players in the destination world
+        ClientboundTeleportEntityPacket tpPacket = ClientboundTeleportEntityPacket.teleport(
+                handle.getId(),
+                net.minecraft.world.entity.PositionMoveRotation.of(handle),
+                java.util.Set.of(),
+                handle.onGround()
+        );
+
+        for (Player p : newLocation.getWorld().getPlayers()) {
+            ServerPlayer nmsP = ((CraftPlayer) p).getHandle();
+            if (nmsP.connection != null && !nmsP.getUUID().equals(handle.getUUID())) {
+                nmsP.connection.send(tpPacket);
+            }
+        }
+
+        // Resend info packets to ensure visual synchronization
         resendPlayerInfoToAll();
-        DebugLogger.log(String.format("Teleported dummy %s (session %s) to %s",
-                ownerName, sessionId, formatLocation()));
+
+        DebugLogger.trace("DummyPlayer.java:teleport",
+                String.format("Teleport complete for %s (session %s) at %s",
+                        ownerName, sessionId, formatLocation()));
+    }
+
+    private static String formatLoc(Location l) {
+        if (l == null || l.getWorld() == null) return "null";
+        return String.format("%s(%.1f, %.1f, %.1f)", l.getWorld().getName(), l.getX(), l.getY(), l.getZ());
     }
 
     /**
@@ -565,6 +671,7 @@ public class DummyPlayer {
             server.getPlayerList().remove(handle);
             spawned = false;
             plugin.getLogger().info("Removed AFK dummy for " + ownerName + " (session: " + sessionId + ")");
+            DebugLogger.lifecycle(sessionId.toString(), "REMOVE", "Removed dummy for " + ownerName);
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE,
                     "Error removing dummy for " + ownerName, e);

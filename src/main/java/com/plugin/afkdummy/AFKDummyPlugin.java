@@ -11,6 +11,7 @@ import com.plugin.afkdummy.util.DebugLogger;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bstats.charts.SingleLineChart;
+import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -19,6 +20,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import com.plugin.afkdummy.entity.DummySession;
+import com.plugin.afkdummy.entity.DummyPlayer;
 
 /**
  * Main plugin class for the AFK Dummy system.
@@ -128,11 +133,17 @@ public class AFKDummyPlugin extends JavaPlugin {
         }
 
         // ====================================================================
-        // 4. Clear Caches
+        // 4. Clear Caches & Close Debug Logger
         // ====================================================================
         SkinUtil.clearCache();
+        DebugLogger.close();
 
         getLogger().info("AFKDummy disabled. All dummies despawned safely.");
+    }
+
+    private static String formatLoc(Location l) {
+        if (l == null || l.getWorld() == null) return "null";
+        return String.format("%s(%.1f, %.1f, %.1f)", l.getWorld().getName(), l.getX(), l.getY(), l.getZ());
     }
 
     @Override
@@ -280,12 +291,48 @@ public class AFKDummyPlugin extends JavaPlugin {
                 sender.sendMessage("§a§l✓ §aDespawned " + count + " dummy(s).");
                 return true;
             }
+            case "debug" -> {
+                if (!sender.hasPermission("afkdummy.admin")) {
+                    sender.sendMessage("§cYou do not have permission to run debug diagnostics.");
+                    return true;
+                }
+                sender.sendMessage("§6§l=== AFKDummy Debug Diagnostics ===");
+                sender.sendMessage("§7• Branch: §fdebug §7| Base: §fa85243c");
+                sender.sendMessage("§7• Active Dummies: §f" + dummyManager.getActiveCount() + "§7/§f" + configManager.getMaxServerWideDummies());
+                sender.sendMessage("§7• Stored Dummies: §f" + storageManager.getAllEntries().size());
+
+                DebugLogger.log("--- MANUAL DEBUG COMMAND EXECUTED BY " + sender.getName() + " ---");
+                DebugLogger.log("Active count: " + dummyManager.getActiveCount() + ", Stored count: " + storageManager.getAllEntries().size());
+
+                for (Map.Entry<UUID, DummySession> entry : dummyManager.getAllSessions().entrySet()) {
+                    UUID id = entry.getKey();
+                    DummySession s = entry.getValue();
+                    DummyPlayer dp = s.getDummyPlayer();
+                    Location bukkitLoc = dp != null && dp.getBukkitPlayer() != null ? dp.getBukkitPlayer().getLocation() : null;
+                    Location nmsLoc = dp != null && dp.getHandle() != null ? new Location(
+                            dp.getHandle().level().getWorld(),
+                            dp.getHandle().getX(), dp.getHandle().getY(), dp.getHandle().getZ(),
+                            dp.getHandle().getYRot(), dp.getHandle().getXRot()
+                    ) : null;
+                    Location storedLoc = s.getLocation();
+
+                    String info = String.format("Session: %s | Owner: %s | Name: %s | Skin: %s | NMS: %s | Bukkit: %s | Stored: %s",
+                            id, s.getOwnerName(), s.getCustomName(), s.getSkinName(),
+                            formatLoc(nmsLoc), formatLoc(bukkitLoc), formatLoc(storedLoc));
+                    DebugLogger.log("  " + info);
+                    sender.sendMessage("§e[Dummy " + id.toString().substring(0, 8) + "] §f" + s.getOwnerName() + " (" + (s.getCustomName() != null ? s.getCustomName() : "default") + ")");
+                    sender.sendMessage("  §7Loc: §f" + (bukkitLoc != null ? String.format("%.1f, %.1f, %.1f", bukkitLoc.getX(), bukkitLoc.getY(), bukkitLoc.getZ()) : "null"));
+                }
+                sender.sendMessage("§aFull state snapshot written to §fplugins/AFKDummy/latest-debug.txt");
+                return true;
+            }
             case "help" -> {
                 sender.sendMessage("§e§lAFK Dummy Admin Commands:");
                 sender.sendMessage("§7 /afkdummy §f— Open the GUI");
                 sender.sendMessage("§7 /afkdummy reload §f— Reload config");
                 sender.sendMessage("§7 /afkdummy list §f— List active sessions");
                 sender.sendMessage("§7 /afkdummy despawnall §f— Remove all dummies");
+                sender.sendMessage("§7 /afkdummy debug §f— Run diagnostic checks");
                 return true;
             }
             default -> {
