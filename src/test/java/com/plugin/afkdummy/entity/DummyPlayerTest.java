@@ -95,15 +95,13 @@ class DummyPlayerTest {
             return list.stream();
         }
 
-        @ParameterizedTest(name = "[{index}] owner={0}")
+        @ParameterizedTest(name = "[{index}] name={0}")
         @MethodSource("provideProfileNameCandidates")
         void testProfileNameValidity(String owner, UUID sessionId) throws Exception {
             String profileName = invokeGenerateProfileName(owner, sessionId);
 
             assertNotNull(profileName);
             assertTrue(profileName.length() <= 16, "Profile name length must be <= 16, but was " + profileName.length() + ": " + profileName);
-            assertTrue(profileName.startsWith("AFK_"), "Must start with AFK_: " + profileName);
-            assertTrue(profileName.endsWith("_" + sessionId.toString().substring(0, 4)), "Must end with session prefix: " + profileName);
             assertTrue(profileName.matches("^[a-zA-Z0-9_]+$"), "Must contain only valid Minecraft name chars: " + profileName);
         }
 
@@ -112,8 +110,17 @@ class DummyPlayerTest {
         void testFallback() throws Exception {
             UUID session = UUID.randomUUID();
             String profileName = invokeGenerateProfileName("!@#$%", session);
-            assertTrue(profileName.startsWith("AFK_Dummy_"));
-            assertTrue(profileName.length() <= 16);
+            assertEquals("Dummy", profileName);
+        }
+
+        @Test
+        @DisplayName("Exact names are preserved without trailing suffix")
+        void testExactNamePreservation() throws Exception {
+            UUID session = UUID.randomUUID();
+            assertEquals("John", invokeGenerateProfileName("John", session));
+            assertEquals("JustRyt", invokeGenerateProfileName("JustRyt", session));
+            assertEquals("Guard", invokeGenerateProfileName("Guard", session));
+            assertEquals("Farmer", invokeGenerateProfileName("Farmer", session));
         }
     }
 }

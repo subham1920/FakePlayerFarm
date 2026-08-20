@@ -321,8 +321,21 @@ public class AFKDummyPlugin extends JavaPlugin {
                             formatLoc(nmsLoc), formatLoc(bukkitLoc), formatLoc(storedLoc));
                     DebugLogger.log("  " + info);
                     sender.sendMessage("§e[Dummy " + id.toString().substring(0, 8) + "] §f" + s.getOwnerName() + " (" + (s.getCustomName() != null ? s.getCustomName() : "default") + ")");
-                    sender.sendMessage("  §7Loc: §f" + (bukkitLoc != null ? String.format("%.1f, %.1f, %.1f", bukkitLoc.getX(), bukkitLoc.getY(), bukkitLoc.getZ()) : "null"));
+                    sender.sendMessage("  §7NMS: §f" + (nmsLoc != null ? String.format("%.4f, %.4f, %.4f (yaw=%.2f, pitch=%.2f)", nmsLoc.getX(), nmsLoc.getY(), nmsLoc.getZ(), nmsLoc.getYaw(), nmsLoc.getPitch()) : "null"));
+                    sender.sendMessage("  §7Bukkit: §f" + (bukkitLoc != null ? String.format("%.4f, %.4f, %.4f (yaw=%.2f, pitch=%.2f)", bukkitLoc.getX(), bukkitLoc.getY(), bukkitLoc.getZ(), bukkitLoc.getYaw(), bukkitLoc.getPitch()) : "null"));
                 }
+
+                var dupes = dummyManager.checkForDuplicates();
+                if (dupes.isEmpty()) {
+                    sender.sendMessage("§a• Duplicate Entity Check: §f0 duplicates detected (OK)");
+                    DebugLogger.log("Duplicate Check: Clean (0 duplicates)");
+                } else {
+                    for (String d : dupes) {
+                        sender.sendMessage("§c§l• " + d);
+                        DebugLogger.log("WARNING: " + d);
+                    }
+                }
+
                 sender.sendMessage("§aFull state snapshot written to §fplugins/AFKDummy/latest-debug.txt");
                 return true;
             }

@@ -5,8 +5,11 @@ import com.plugin.afkdummy.config.ConfigManager;
 import com.plugin.afkdummy.storage.DummyData;
 import com.plugin.afkdummy.storage.StorageManager;
 import com.plugin.afkdummy.util.DebugLogger;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -128,15 +131,18 @@ public class DummyManager {
             // Create the dummy player entity with custom name & skin
             DummyPlayer dummyPlayer = new DummyPlayer(ownerUUID, ownerName, location, sessionId, customName, skinName, plugin);
 
-            // Spawn it into the world
-            dummyPlayer.spawn();
-
-            // Create the session
+            // Create the session and pre-register it so PlayerSpawnLocationEvent finds it during placeNewPlayer()
             long expirationTimestamp = System.currentTimeMillis() + durationMs;
             DummySession session = new DummySession(sessionId, dummyPlayer, ownerUUID, ownerName, expirationTimestamp);
-
-            // Register the session by session ID
             activeSessions.put(sessionId, session);
+
+            try {
+                // Spawn it into the world
+                dummyPlayer.spawn();
+            } catch (Exception e) {
+                activeSessions.remove(sessionId);
+                throw e;
+            }
 
             // Persist to storage
             DummyData data = new DummyData(
@@ -395,25 +401,28 @@ public class DummyManager {
             }
 
             try {
-                // Create and spawn the dummy with preserved session ID and custom name/skin
+                // Create and pre-register dummy with preserved session ID and custom name/skin
                 DummyPlayer dummyPlayer = new DummyPlayer(
                         data.getOwnerUUID(), data.getOwnerName(), location, sessionId,
                         data.getCustomName(), data.getSkinName(), plugin);
-                dummyPlayer.spawn();
 
-                // Create session with the ORIGINAL expiration timestamp
                 DummySession session = new DummySession(
                         sessionId, dummyPlayer, data.getOwnerUUID(), data.getOwnerName(),
                         data.getExpirationTimestamp());
 
                 activeSessions.put(sessionId, session);
 
-                // Update the entity ID in storage
-                data.setDummyEntityId(dummyPlayer.getEntityId());
-
-                restored++;
-                plugin.getLogger().info("Restored dummy for " + data.getOwnerName()
-                        + " [Session: " + sessionId + "] (remaining: " + session.getFormattedTimeRemaining() + ")");
+                try {
+                    dummyPlayer.spawn();
+                    // Update the entity ID in storage
+                    data.setDummyEntityId(dummyPlayer.getEntityId());
+                    restored++;
+                    plugin.getLogger().info("Restored dummy for " + data.getOwnerName()
+                            + " [Session: " + sessionId + "] (remaining: " + session.getFormattedTimeRemaining() + ")");
+                } catch (Exception spawnEx) {
+                    activeSessions.remove(sessionId);
+                    throw spawnEx;
+                }
 
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING,
@@ -747,9 +756,9 @@ public class DummyManager {
                         e -> e instanceof Player && !isDummyPlayer((Player) e)).size();
 
                 DebugLogger.log(String.format(
-                        "Dummy [%s (Session: %s)]: Pos=%s(%d, %d, %d) | InPlayerList=%b | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
+                        "Dummy [%s (Session: %s)]: Pos=%s(%.4f, %.4f, %.4f, yaw=%.2f, pitch=%.2f) | InPlayerList=%b | ChunkLoaded=%b | affectsSpawning=%b | GameMode=%s | doMobSpawning=%b | NearbyMonsters(32m)=%d | RealPlayersNearby(128m)=%d | EntityValid=%b",
                         session.getOwnerName(), session.getSessionId(),
-                        world.getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(),
+                        world.getName(), loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch(),
                         inPlayerList,
                         chunkLoaded,
                         affectsSpawning,
@@ -763,5 +772,42 @@ public class DummyManager {
                 DebugLogger.log(String.format("Dummy [%s]: Exception in diagnostics: %s", session.getOwnerName(), e.getMessage()));
             }
         }
+    }
+
+    /**
+     * Searches server entity registries and player list to detect any duplicate dummy entities.
+     */
+    public List<String> checkForDuplicates() {
+        List<String> reports = new ArrayList<>();
+        try {
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            Map<UUID, Integer> uuidCounts = new HashMap<>();
+            Map<Integer, Integer> idCounts = new HashMap<>();
+
+            for (ServerPlayer sp : server.getPlayerList().getPlayers()) {
+                uuidCounts.put(sp.getUUID(), uuidCounts.getOrDefault(sp.getUUID(), 0) + 1);
+                idCounts.put(sp.getId(), idCounts.getOrDefault(sp.getId(), 0) + 1);
+            }
+
+            for (Map.Entry<UUID, DummySession> entry : activeSessions.entrySet()) {
+                UUID sessionId = entry.getKey();
+                DummySession session = entry.getValue();
+                DummyPlayer dp = session.getDummyPlayer();
+                if (dp == null || dp.getHandle() == null) continue;
+
+                UUID entityUUID = dp.getHandle().getUUID();
+                int entityId = dp.getEntityId();
+                int countByUUID = uuidCounts.getOrDefault(entityUUID, 0);
+                int countById = idCounts.getOrDefault(entityId, 0);
+
+                if (countByUUID > 1 || countById > 1) {
+                    reports.add(String.format("DUPLICATE ENTITY DETECTED: session=%s owner=%s UUID_copies=%d ID_copies=%d loc=%s",
+                            sessionId, session.getOwnerName(), countByUUID, countById, dp.getLocation()));
+                }
+            }
+        } catch (Throwable t) {
+            DebugLogger.log("Warning in duplicate check: " + t.getMessage());
+        }
+        return reports;
     }
 }

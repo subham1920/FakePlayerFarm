@@ -78,10 +78,9 @@ public class DummyPlayer {
 
         MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
         ServerLevel level = ((CraftWorld) location.getWorld()).getHandle();
-
-        // Create GameProfile with unique UUID and compliant username
+        // Create GameProfile with unique UUID and exact username (no extra trailing characters!)
         UUID dummyUUID = generateDummyUUID(ownerUUID, this.sessionId);
-        String dummyProfileName = generateProfileName(ownerName, this.sessionId);
+        String dummyProfileName = generateProfileName(customName != null ? customName : ownerName);
         GameProfile profile = new GameProfile(dummyUUID, dummyProfileName);
 
         // Create ClientInformation with default settings
@@ -90,9 +89,12 @@ public class DummyPlayer {
         // Create the ServerPlayer entity
         this.handle = new ServerPlayer(server, level, profile, clientInfo);
 
-        // Pre-set position
+        // Pre-set position and rotation (including head and body yaw)
         handle.setPos(location.getX(), location.getY(), location.getZ());
         handle.setRot(location.getYaw(), location.getPitch());
+        handle.setYHeadRot(location.getYaw());
+        handle.setYBodyRot(location.getYaw());
+        handle.setOldPosAndRot();
 
         // Set up spoofed network connection
         this.connection = createSpoofedConnection();
@@ -226,15 +228,15 @@ public class DummyPlayer {
         this.customName = (newName != null && !newName.trim().isEmpty()) ? newName.trim() : null;
 
         if (handle != null && handle.getBukkitEntity() != null) {
-            String displayName = this.customName != null ? this.customName : "[AFK] " + ownerName;
+            String displayName = this.customName != null ? this.customName : ownerName;
 
             // 1. Update Adventure Player List Name (Tab List) & Bukkit Custom Name
             handle.getBukkitEntity().playerListName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().customName(net.kyori.adventure.text.Component.text(displayName));
             handle.getBukkitEntity().setCustomNameVisible(true);
 
-            // 2. Update GameProfile Name on NMS ServerPlayer so 3D nametag renders correctly
-            String newProfileName = generateProfileName(this.customName != null ? this.customName : ownerName, sessionId);
+            // 2. Update GameProfile Name on NMS ServerPlayer so 3D nametag renders correctly (clean name, zero trailing chars!)
+            String newProfileName = generateProfileName(displayName);
             updateGameProfileName(newProfileName);
 
             // 3. Update Scoreboard Team for in-world styling
@@ -545,10 +547,14 @@ public class DummyPlayer {
             // Cross-world teleport
             handle.teleportTo(targetLevel, newLocation.getX(), newLocation.getY(), newLocation.getZ(),
                     java.util.Set.of(), newLocation.getYaw(), newLocation.getPitch(), true);
+            handle.setYHeadRot(newLocation.getYaw());
+            handle.setYBodyRot(newLocation.getYaw());
         } else {
             // Same world authoritative moveTo
             handle.setPos(newLocation.getX(), newLocation.getY(), newLocation.getZ());
             handle.setRot(newLocation.getYaw(), newLocation.getPitch());
+            handle.setYHeadRot(newLocation.getYaw());
+            handle.setYBodyRot(newLocation.getYaw());
             handle.setOldPosAndRot();
         }
 
@@ -570,15 +576,19 @@ public class DummyPlayer {
                 handle.onGround()
         );
 
+        byte headYawByte = (byte) ((newLocation.getYaw() * 256.0F) / 360.0F);
+        byte pitchByte = (byte) ((newLocation.getPitch() * 256.0F) / 360.0F);
+        ClientboundRotateHeadPacket headPacket = new ClientboundRotateHeadPacket(handle, headYawByte);
+        ClientboundMoveEntityPacket.Rot rotPacket = new ClientboundMoveEntityPacket.Rot(handle.getId(), headYawByte, pitchByte, handle.onGround());
+
         for (Player p : newLocation.getWorld().getPlayers()) {
             ServerPlayer nmsP = ((CraftPlayer) p).getHandle();
             if (nmsP.connection != null && !nmsP.getUUID().equals(handle.getUUID())) {
                 nmsP.connection.send(tpPacket);
+                nmsP.connection.send(headPacket);
+                nmsP.connection.send(rotPacket);
             }
         }
-
-        // Resend info packets to ensure visual synchronization
-        resendPlayerInfoToAll();
 
         DebugLogger.trace("DummyPlayer.java:teleport",
                 String.format("Teleport complete for %s (session %s) at %s",
@@ -751,16 +761,27 @@ public class DummyPlayer {
     }
 
     /**
-     * Generates a valid alphanumeric GameProfile username (<= 16 chars).
+     * Generates a valid alphanumeric GameProfile username (<= 16 chars) with zero trailing suffixes or extra characters.
      */
-    private static String generateProfileName(String ownerName, UUID sessionId) {
-        String sanitized = ownerName.replaceAll("[^a-zA-Z0-9_]", "");
-        if (sanitized.isEmpty()) sanitized = "Dummy";
-        String suffix = sessionId.toString().substring(0, 4);
-        String prefix = "AFK_";
-        int maxBase = 16 - prefix.length() - 1 - suffix.length();
-        String base = sanitized.length() > maxBase ? sanitized.substring(0, maxBase) : sanitized;
-        return prefix + base + "_" + suffix;
+    public static String generateProfileName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return "Dummy";
+        }
+        String sanitized = name.replaceAll("[^a-zA-Z0-9_]", "");
+        if (sanitized.isEmpty()) {
+            sanitized = "Dummy";
+        }
+        if (sanitized.length() > 16) {
+            sanitized = sanitized.substring(0, 16);
+        }
+        return sanitized;
+    }
+
+    /**
+     * Overload for backward compatibility.
+     */
+    public static String generateProfileName(String name, UUID sessionId) {
+        return generateProfileName(name);
     }
 
     /**
