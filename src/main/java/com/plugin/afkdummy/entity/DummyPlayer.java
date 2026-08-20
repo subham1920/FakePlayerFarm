@@ -466,35 +466,78 @@ public class DummyPlayer {
     }
 
     /**
-     * Updates or registers the Scoreboard Team to format the in-world nametag cleanly.
+     * Updates or registers the Scoreboard Team to format the in-world nametag cleanly with [AFK] prefix.
      */
     private void updateScoreboardTeam() {
         try {
-            org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
             String teamName = getTeamName();
+            String currentScoreboardName = handle.getScoreboardName();
+
+            // 1. Update MainScoreboard
+            org.bukkit.scoreboard.Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
             org.bukkit.scoreboard.Team team = scoreboard.getTeam(teamName);
             if (team == null) {
                 team = scoreboard.registerNewTeam(teamName);
             }
-
-            String currentScoreboardName = handle.getScoreboardName();
-
-            // Clean up any stale entries in this team
             for (String entry : new java.util.HashSet<>(team.getEntries())) {
                 if (!entry.equals(currentScoreboardName)) {
                     team.removeEntry(entry);
                 }
             }
-
             if (!team.hasEntry(currentScoreboardName)) {
                 team.addEntry(currentScoreboardName);
             }
-
-            // In-world 3D nametag above head renders: Team.prefix + GameProfile.name
-            // We set prefix to "[AFK] " and color to GRAY/WHITE for clear, professional styling
             team.prefix(net.kyori.adventure.text.Component.text("[AFK] ").color(net.kyori.adventure.text.format.NamedTextColor.GRAY));
             team.suffix(net.kyori.adventure.text.Component.empty());
             team.color(net.kyori.adventure.text.format.NamedTextColor.WHITE);
+
+            // 2. Update every online player's individual active scoreboard (for servers with scoreboard plugins)
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                try {
+                    org.bukkit.scoreboard.Scoreboard pScoreboard = player.getScoreboard();
+                    if (pScoreboard != null && pScoreboard != scoreboard) {
+                        org.bukkit.scoreboard.Team pTeam = pScoreboard.getTeam(teamName);
+                        if (pTeam == null) {
+                            pTeam = pScoreboard.registerNewTeam(teamName);
+                        }
+                        for (String entry : new java.util.HashSet<>(pTeam.getEntries())) {
+                            if (!entry.equals(currentScoreboardName)) {
+                                pTeam.removeEntry(entry);
+                            }
+                        }
+                        if (!pTeam.hasEntry(currentScoreboardName)) {
+                            pTeam.addEntry(currentScoreboardName);
+                        }
+                        pTeam.prefix(net.kyori.adventure.text.Component.text("[AFK] ").color(net.kyori.adventure.text.format.NamedTextColor.GRAY));
+                        pTeam.suffix(net.kyori.adventure.text.Component.empty());
+                        pTeam.color(net.kyori.adventure.text.format.NamedTextColor.WHITE);
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            // 3. Update NMS Server Scoreboard and broadcast ClientboundSetPlayerTeamPacket directly
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            net.minecraft.world.scores.Scoreboard nmsScoreboard = server.getScoreboard();
+            net.minecraft.world.scores.PlayerTeam nmsTeam = nmsScoreboard.getPlayerTeam(teamName);
+            if (nmsTeam == null) {
+                nmsTeam = nmsScoreboard.addPlayerTeam(teamName);
+            }
+            nmsTeam.setPlayerPrefix(net.minecraft.network.chat.Component.literal("[AFK] ").withStyle(net.minecraft.ChatFormatting.GRAY));
+            if (!nmsTeam.getPlayers().contains(currentScoreboardName)) {
+                nmsScoreboard.addPlayerToTeam(currentScoreboardName, nmsTeam);
+            }
+
+            ClientboundSetPlayerTeamPacket addTeamPacket = ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(nmsTeam, true);
+            ClientboundSetPlayerTeamPacket addPlayerPacket = ClientboundSetPlayerTeamPacket.createPlayerPacket(nmsTeam, currentScoreboardName, ClientboundSetPlayerTeamPacket.Action.ADD);
+
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
+                if (nmsPlayer.connection != null) {
+                    nmsPlayer.connection.send(addTeamPacket);
+                    nmsPlayer.connection.send(addPlayerPacket);
+                }
+            }
+
         } catch (Throwable e) {
             DebugLogger.log("Warning: Failed to update scoreboard team for dummy: " + e.getMessage());
         }
@@ -714,6 +757,19 @@ public class DummyPlayer {
 
         ServerPlayer nmsPlayer = ((CraftPlayer) player).getHandle();
         if (nmsPlayer.connection == null) return;
+
+        // Send Scoreboard Team packets first so the client associates the profile name with [AFK] prefix
+        try {
+            String teamName = getTeamName();
+            String currentScoreboardName = handle.getScoreboardName();
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            net.minecraft.world.scores.Scoreboard nmsScoreboard = server.getScoreboard();
+            net.minecraft.world.scores.PlayerTeam nmsTeam = nmsScoreboard.getPlayerTeam(teamName);
+            if (nmsTeam != null) {
+                nmsPlayer.connection.send(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(nmsTeam, true));
+                nmsPlayer.connection.send(ClientboundSetPlayerTeamPacket.createPlayerPacket(nmsTeam, currentScoreboardName, ClientboundSetPlayerTeamPacket.Action.ADD));
+            }
+        } catch (Throwable ignored) {}
 
         ClientboundPlayerInfoUpdatePacket infoPacket = new ClientboundPlayerInfoUpdatePacket(
                 EnumSet.of(
