@@ -71,9 +71,10 @@ public class AFKDummyPlugin extends JavaPlugin {
         inputManager.start();
 
         // ====================================================================
-        // 4. Initialize Compatibility Service (Simple Voice Chat, etc.)
+        // 4. Initialize Compatibility Service & Public API
         // ====================================================================
         voiceChatCompatibility = new com.plugin.afkdummy.compat.VoiceChatCompatibility(this);
+        com.plugin.afkdummy.api.AfkDummyAPI.init(this);
 
         // ====================================================================
         // 5. Register Event Listeners

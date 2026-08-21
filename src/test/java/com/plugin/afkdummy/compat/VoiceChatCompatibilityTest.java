@@ -110,4 +110,43 @@ class VoiceChatCompatibilityTest {
         assertFalse(compat.isFakePlayer(player));
         assertFalse(DummyPlayer.isNPC(player));
     }
+
+    @Test
+    @DisplayName("Detects spark when plugin is present and enabled")
+    void testSparkDetected() {
+        Plugin sparkPlugin = mock(Plugin.class);
+        PluginDescriptionFile desc = mock(PluginDescriptionFile.class);
+
+        when(desc.getVersion()).thenReturn("1.10.119");
+        when(sparkPlugin.getDescription()).thenReturn(desc);
+        when(sparkPlugin.isEnabled()).thenReturn(true);
+        when(pluginManager.getPlugin("spark")).thenReturn(sparkPlugin);
+
+        VoiceChatCompatibility compat = new VoiceChatCompatibility(plugin);
+
+        assertTrue(compat.isSparkPresent());
+        assertEquals("1.10.119", compat.getSparkVersion());
+    }
+
+    @Test
+    @DisplayName("AfkDummyAPI correctly identifies fake players by Player and UUID")
+    void testAfkDummyAPI() {
+        com.plugin.afkdummy.api.AfkDummyAPI.init(plugin);
+
+        Player player = mock(Player.class);
+        when(player.hasMetadata("NPC")).thenReturn(true);
+
+        assertTrue(com.plugin.afkdummy.api.AfkDummyAPI.isDummy(player));
+
+        Player realPlayer = mock(Player.class);
+        when(realPlayer.hasMetadata("NPC")).thenReturn(false);
+        when(realPlayer.hasMetadata("afkdummy")).thenReturn(false);
+        when(realPlayer.hasMetadata("afkdummy:fake_player")).thenReturn(false);
+
+        DummyManager dummyManager = mock(DummyManager.class);
+        when(plugin.getDummyManager()).thenReturn(dummyManager);
+        when(dummyManager.isDummyPlayer(realPlayer)).thenReturn(false);
+
+        assertFalse(com.plugin.afkdummy.api.AfkDummyAPI.isDummy(realPlayer));
+    }
 }

@@ -335,6 +335,10 @@ public class DummyPlayer {
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
 
+            // Isolate dummy from PlayerList.players so Bukkit.getOnlinePlayers() only contains
+            // real players, preventing duplicate key collisions in Spark, ping monitors, and player lookups
+            server.getPlayerList().getPlayers().remove(handle);
+
             // Authoritatively place and teleport the dummy to spawnLocation in case placeNewPlayer shifted or defaulted location
             handle.teleportTo(level, spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ(),
                     java.util.Collections.emptySet(), spawnLocation.getYaw(), spawnLocation.getPitch(), true);
@@ -382,6 +386,12 @@ public class DummyPlayer {
 
             spawned = true;
             resendPlayerInfoToAll();
+
+            DebugLogger.log(String.format("[REGISTRATION] dummy=%s profileUUID=%s profileName=%s entityId=%d PlayerList=%b BukkitOnline=%b ServerLevel=%b Connection=VirtualSpoofed reason=spawn",
+                    sessionId, handle.getUUID(), handle.getGameProfile().name(), handle.getId(),
+                    server.getPlayerList().getPlayers().contains(handle),
+                    Bukkit.getOnlinePlayers().stream().anyMatch(p -> p.getUniqueId().equals(handle.getUUID())),
+                    level.players().contains(handle)));
 
             plugin.getLogger().info("Spawned AFK dummy for " + ownerName
                     + " at " + formatLocation());
@@ -736,6 +746,8 @@ public class DummyPlayer {
             MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
             server.getPlayerList().remove(handle);
             spawned = false;
+            DebugLogger.log(String.format("[UNREGISTRATION] dummy=%s profileUUID=%s profileName=%s entityId=%d reason=despawn",
+                    sessionId, handle.getUUID(), handle.getGameProfile().name(), handle.getId()));
             plugin.getLogger().info("Removed AFK dummy for " + ownerName + " (session: " + sessionId + ")");
             DebugLogger.lifecycle(sessionId.toString(), "REMOVE", "Removed dummy for " + ownerName);
         } catch (Exception e) {

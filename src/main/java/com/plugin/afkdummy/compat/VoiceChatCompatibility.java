@@ -24,29 +24,35 @@ public class VoiceChatCompatibility {
     private final AFKDummyPlugin plugin;
     private final boolean voiceChatPresent;
     private final String voiceChatVersion;
+    private final boolean sparkPresent;
+    private final String sparkVersion;
 
     public VoiceChatCompatibility(AFKDummyPlugin plugin) {
         this.plugin = plugin;
 
         Plugin vcPlugin = null;
+        Plugin spPlugin = null;
         try {
             if (plugin.getServer() != null && plugin.getServer().getPluginManager() != null) {
                 vcPlugin = plugin.getServer().getPluginManager().getPlugin("voicechat");
+                spPlugin = plugin.getServer().getPluginManager().getPlugin("spark");
             }
         } catch (Throwable ignored) {}
 
-        if (vcPlugin != null) {
-            this.voiceChatPresent = true;
-            this.voiceChatVersion = vcPlugin.getDescription().getVersion();
-            plugin.getLogger().info("[AFKDummy] Simple Voice Chat detected: " + voiceChatVersion);
-            plugin.getLogger().info("[AFKDummy] Fake-player voice-chat compatibility: ENABLED");
-            DebugLogger.log(String.format("VOICECHAT_COMPAT detected=true version=%s status=ENABLED", voiceChatVersion));
-        } else {
-            this.voiceChatPresent = false;
-            this.voiceChatVersion = null;
-            plugin.getLogger().info("[AFKDummy] Simple Voice Chat not detected.");
-            DebugLogger.log("VOICECHAT_COMPAT detected=false status=STANDALONE");
-        }
+        this.voiceChatPresent = (vcPlugin != null && vcPlugin.isEnabled());
+        this.voiceChatVersion = (this.voiceChatPresent) ? vcPlugin.getDescription().getVersion() : null;
+
+        this.sparkPresent = (spPlugin != null && spPlugin.isEnabled());
+        this.sparkVersion = (this.sparkPresent) ? spPlugin.getDescription().getVersion() : null;
+
+        String vcStatus = voiceChatPresent ? voiceChatVersion : "not detected";
+        String spStatus = sparkPresent ? sparkVersion : "not detected";
+
+        plugin.getLogger().info(String.format("[AFKDummy] Integration detection: Simple Voice Chat = %s | spark = %s", vcStatus, spStatus));
+        plugin.getLogger().info("[AFKDummy] Fake-player integration compatibility: ENABLED");
+
+        DebugLogger.log(String.format("INTEGRATION_DETECTION voicechat=%s (version=%s) spark=%s (version=%s) status=ENABLED",
+                voiceChatPresent, vcStatus, sparkPresent, spStatus));
     }
 
     /**
@@ -93,5 +99,19 @@ public class VoiceChatCompatibility {
      */
     public String getVoiceChatVersion() {
         return voiceChatVersion;
+    }
+
+    /**
+     * @return true if spark is installed and detected on this server
+     */
+    public boolean isSparkPresent() {
+        return sparkPresent;
+    }
+
+    /**
+     * @return the detected spark version string, or null if absent
+     */
+    public String getSparkVersion() {
+        return sparkVersion;
     }
 }
