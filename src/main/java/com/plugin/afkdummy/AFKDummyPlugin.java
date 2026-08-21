@@ -42,6 +42,7 @@ public class AFKDummyPlugin extends JavaPlugin {
     private DummyManager dummyManager;
     private com.plugin.afkdummy.gui.InputManager inputManager;
     private UpdateChecker updateChecker;
+    private com.plugin.afkdummy.compat.VoiceChatCompatibility voiceChatCompatibility;
     private Metrics metrics;
 
     @Override
@@ -70,14 +71,19 @@ public class AFKDummyPlugin extends JavaPlugin {
         inputManager.start();
 
         // ====================================================================
-        // 4. Register Event Listeners
+        // 4. Initialize Compatibility Service (Simple Voice Chat, etc.)
+        // ====================================================================
+        voiceChatCompatibility = new com.plugin.afkdummy.compat.VoiceChatCompatibility(this);
+
+        // ====================================================================
+        // 5. Register Event Listeners
         // ====================================================================
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new GUIListener(), this);
         getServer().getPluginManager().registerEvents(inputManager, this);
 
         // ====================================================================
-        // 5. Initialize bStats Metrics
+        // 6. Initialize bStats Metrics
         // ====================================================================
         try {
             metrics = new Metrics(this, BSTATS_PLUGIN_ID);
@@ -90,7 +96,7 @@ public class AFKDummyPlugin extends JavaPlugin {
         }
 
         // ====================================================================
-        // 6. Schedule Delayed Respawn from Storage
+        // 7. Schedule Delayed Respawn from Storage
         // ====================================================================
         // Wait for worlds to fully load before respawning dummies
         int respawnDelay = configManager.getRespawnDelayTicks();
@@ -100,7 +106,7 @@ public class AFKDummyPlugin extends JavaPlugin {
         }, respawnDelay);
 
         // ====================================================================
-        // 7. Asynchronous Update Checker
+        // 8. Asynchronous Update Checker
         // ====================================================================
         updateChecker = new UpdateChecker(this);
         updateChecker.checkForUpdatesAsync();
@@ -412,5 +418,10 @@ public class AFKDummyPlugin extends JavaPlugin {
     /** @return the asynchronous update checker */
     public UpdateChecker getUpdateChecker() {
         return updateChecker;
+    }
+
+    /** @return the VoiceChatCompatibility service */
+    public com.plugin.afkdummy.compat.VoiceChatCompatibility getVoiceChatCompatibility() {
+        return voiceChatCompatibility;
     }
 }

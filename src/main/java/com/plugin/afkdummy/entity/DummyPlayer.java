@@ -29,6 +29,7 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.plugin.Plugin;
 
 import java.util.EnumSet;
@@ -102,6 +103,9 @@ public class DummyPlayer {
         this.cookie = new CommonListenerCookie(profile, 0, clientInfo, false, "vanilla",
                 channels, new io.papermc.paper.util.KeepAlive());
         setupMockPacketListener(server);
+
+        // Tag with standard NPC metadata for compatibility with voicechat, anticheats, and auth plugins
+        applyNpcMetadata();
 
         // Load skin asynchronously (custom skin if specified, else owner's skin)
         if (skinName != null && !skinName.trim().isEmpty()) {
@@ -358,6 +362,9 @@ public class DummyPlayer {
 
             // Exclude dummy from sleep requirement so real players can sleep
             handle.getBukkitEntity().setSleepingIgnored(true);
+
+            // Re-apply NPC metadata tags to Bukkit entity
+            applyNpcMetadata();
 
             // Set clean tab list display name & nametag using Adventure API
             String displayName = getFormattedDisplayName();
@@ -943,5 +950,32 @@ public class DummyPlayer {
     /** @return the Bukkit Player entity wrapping this dummy */
     public Player getBukkitPlayer() {
         return handle.getBukkitEntity();
+    }
+
+    /**
+     * Tags the Bukkit Player entity with standard Bukkit NPC metadata.
+     */
+    private void applyNpcMetadata() {
+        if (handle != null && handle.getBukkitEntity() != null && plugin != null) {
+            try {
+                FixedMetadataValue val = new FixedMetadataValue(plugin, true);
+                handle.getBukkitEntity().setMetadata("NPC", val);
+                handle.getBukkitEntity().setMetadata("afkdummy", val);
+                handle.getBukkitEntity().setMetadata("afkdummy:fake_player", val);
+            } catch (Throwable t) {
+                DebugLogger.log("Warning: Failed to set NPC metadata: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Checks if a Bukkit Player entity is a fake player / NPC.
+     *
+     * @param player the Player to check
+     * @return true if tagged with NPC metadata
+     */
+    public static boolean isNPC(Player player) {
+        if (player == null) return false;
+        return player.hasMetadata("NPC") || player.hasMetadata("afkdummy") || player.hasMetadata("afkdummy:fake_player");
     }
 }

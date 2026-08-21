@@ -279,33 +279,54 @@ public class PlayerListener implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerSpawnLocation(org.spigotmc.event.player.PlayerSpawnLocationEvent event) {
         Player player = event.getPlayer();
-        if (dummyManager.isDummyPlayer(player)) {
+        boolean isDummy = isDummy(player);
+        if (isDummy) {
             Optional<DummySession> session = dummyManager.getSessionByPlayer(player);
             if (session.isPresent()) {
                 Location loc = session.get().getLocation();
                 if (loc != null && loc.getWorld() != null) {
                     event.setSpawnLocation(loc);
-                    DebugLogger.trace("PlayerListener.java:onPlayerSpawnLocation",
-                            "Overrode PlayerSpawnLocationEvent for dummy " + player.getName() + " to " + loc);
+                    DebugLogger.log(String.format("PLAYER_SPAWN_LOCATION_EVENT actor=dummy uuid=%s entityId=%d targetLoc=%s",
+                            player.getUniqueId(), player.getEntityId(), loc));
                 }
             }
         }
     }
 
     /**
-     * Sends dummy spawn packets to newly joined players.
+     * Sends dummy spawn packets to newly joined real players and logs join lifecycle.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        boolean isDummy = isDummy(player);
+
+        DebugLogger.log(String.format("PLAYER_JOIN_EVENT actor=%s uuid=%s entityId=%d isDummy=%b connection=%s networkChannel=%s",
+                isDummy ? "dummy" : "player", player.getUniqueId(), player.getEntityId(), isDummy,
+                isDummy ? "VIRTUAL_SPOOFED" : "REAL_CLIENT",
+                isDummy ? "VIRTUAL_PIPELINE" : "NETTY_CHANNEL"));
+
         org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            Player player = event.getPlayer();
             if (player.isOnline()) {
-                dummyManager.handlePlayerJoin(player);
-                if (plugin.getUpdateChecker() != null) {
-                    plugin.getUpdateChecker().notifyPlayerIfUpdateAvailable(player);
+                if (!isDummy) {
+                    dummyManager.handlePlayerJoin(player);
+                    if (plugin.getUpdateChecker() != null) {
+                        plugin.getUpdateChecker().notifyPlayerIfUpdateAvailable(player);
+                    }
                 }
             }
         }, 10L);
+    }
+
+    /**
+     * Handles player quit lifecycle logging.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        boolean isDummy = isDummy(player);
+        DebugLogger.log(String.format("PLAYER_QUIT_EVENT actor=%s uuid=%s entityId=%d isDummy=%b",
+                isDummy ? "dummy" : "player", player.getUniqueId(), player.getEntityId(), isDummy));
     }
 
     /**
