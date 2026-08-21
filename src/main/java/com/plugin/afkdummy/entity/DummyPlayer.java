@@ -98,8 +98,9 @@ public class DummyPlayer {
 
         // Set up spoofed network connection
         this.connection = createSpoofedConnection();
+        java.util.Set<String> channels = java.util.concurrent.ConcurrentHashMap.newKeySet();
         this.cookie = new CommonListenerCookie(profile, 0, clientInfo, false, "vanilla",
-                java.util.Collections.emptySet(), new io.papermc.paper.util.KeepAlive());
+                channels, new io.papermc.paper.util.KeepAlive());
         setupMockPacketListener(server);
 
         // Load skin asynchronously (custom skin if specified, else owner's skin)
@@ -329,6 +330,15 @@ public class DummyPlayer {
 
             // Inject the player into the server list and world
             server.getPlayerList().placeNewPlayer(connection, handle, cookie);
+
+            // Authoritatively place and teleport the dummy to spawnLocation in case placeNewPlayer shifted or defaulted location
+            handle.teleportTo(level, spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ(),
+                    java.util.Collections.emptySet(), spawnLocation.getYaw(), spawnLocation.getPitch(), true);
+            handle.setPos(spawnLocation.getX(), spawnLocation.getY(), spawnLocation.getZ());
+            handle.setRot(spawnLocation.getYaw(), spawnLocation.getPitch());
+            handle.setYHeadRot(spawnLocation.getYaw());
+            handle.setYBodyRot(spawnLocation.getYaw());
+            handle.setOldPosAndRot();
 
             // Reset connection teleport state to prevent pending unconfirmed teleport
             if (handle.connection != null) {
